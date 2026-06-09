@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .shimmer {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 800px 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  .gradient-ring {
+    background: conic-gradient(from 0deg, #6366f1, #8b5cf6, #ec4899, transparent 75%);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 12px), white calc(100% - 11px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 12px), white calc(100% - 11px));
+    border-radius: 50%;
+  }
+}

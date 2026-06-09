@@ -1,0 +1,10 @@
+Classify the following {{ pois | length }} points of interest.
+
+{% for poi in pois %}
+[{{ loop.index }}] Name: {{ poi.name }}
+{% if poi.address %}    Address: {{ poi.address }}
+{% endif %}{% if poi.types %}    Google types: {{ poi.types | join(', ') }}
+{% endif %}{% if poi.rating is not none %}    Rating: {{ poi.rating }}
+{% endif %}
+{% endfor %}
+Produce exactly {{ pois | length }} JSON objects in the same order as listed above.

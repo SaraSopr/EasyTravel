@@ -1,0 +1,20 @@
+Two classifiers disagreed on this POI. Review both outputs and produce the final classification.
+
+POI:
+Name: {{ name }}
+{% if address %}Address: {{ address }}
+{% endif %}{% if types %}Google types: {{ types | join(', ') }}
+{% endif %}
+Classifier 1: {{ result1 | tojson }}
+Classifier 2: {{ result2 | tojson }}
+
+{% set cat1 = result1.get('travel_category', 'unknown') %}
+{% set cat2 = result2.get('travel_category', 'unknown') %}
+{% if cat1 != cat2 %}
+Point of disagreement: travel_category — Classifier 1 says "{{ cat1 }}", Classifier 2 says "{{ cat2 }}".
+{% else %}
+Categories agree ({{ cat1 }}), but vectors or is_indoor_visitable differ.
+{% endif %}
+
+Either classifier may be wrong — choose a third option if both are incorrect.
+Explain what each classifier got right and wrong before producing your answer.
