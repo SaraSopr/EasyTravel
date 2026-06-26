@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
@@ -234,13 +234,9 @@ async def generate_itinerary(
     )
 
     # --- Persist ---
-    today = date.today()
-    end_date = today + timedelta(days=payload.num_days - 1)
     itinerary = Itinerary(
         user_id=current_user.id,
         city=city.name,
-        start_date=today,
-        end_date=end_date,
     )
     db.add(itinerary)
     # Maps (day_number, position) -> persisted item id, so the response can expose
@@ -273,7 +269,6 @@ async def generate_itinerary(
     seen_ids = confirmed_visited_ids | previously_suggested_ids
     days_out: list[ItineraryDayOut] = []
     for day_idx, day_stops in enumerate(all_days):
-        day_date = today + timedelta(days=day_idx)
         stops_out = [
             _stop_to_schema(
                 s, pos,
@@ -282,13 +277,11 @@ async def generate_itinerary(
             )
             for pos, s in enumerate(day_stops, start=1)
         ]
-        days_out.append(ItineraryDayOut(day_number=day_idx + 1, date=day_date, stops=stops_out))
+        days_out.append(ItineraryDayOut(day_number=day_idx + 1, stops=stops_out))
 
     return ItineraryOut(
         itinerary_id=itinerary.id,
         city=city.name,
-        start_date=today,
-        end_date=end_date,
         num_days=payload.num_days,
         warnings=warnings,
         days=days_out,
@@ -315,12 +308,10 @@ async def list_itineraries(
 
     summaries: list[ItinerarySummary] = []
     for it in itineraries:
-        num_days = (it.end_date - it.start_date).days + 1
+        num_days = max((item.day_number for item in it.items), default=0)
         summaries.append(ItinerarySummary(
             itinerary_id=it.id,
             city=it.city,
-            start_date=it.start_date,
-            end_date=it.end_date,
             num_days=num_days,
             created_at=it.created_at,
             num_stops=len(it.items),
@@ -354,7 +345,6 @@ async def get_itinerary(
 
     days_out: list[ItineraryDayOut] = []
     for day_num in sorted(days_map.keys()):
-        day_date = itinerary.start_date + timedelta(days=day_num - 1)
         items = days_map[day_num]
         stops_out: list[ItineraryStop] = []
         prev_poi: object | None = None
@@ -396,14 +386,12 @@ async def get_itinerary(
             ))
             prev_poi = poi
 
-        days_out.append(ItineraryDayOut(day_number=day_num, date=day_date, stops=stops_out))
+        days_out.append(ItineraryDayOut(day_number=day_num, stops=stops_out))
 
-    num_days = (itinerary.end_date - itinerary.start_date).days + 1
+    num_days = max(days_map.keys(), default=0)
     return ItineraryOut(
         itinerary_id=itinerary.id,
         city=itinerary.city,
-        start_date=itinerary.start_date,
-        end_date=itinerary.end_date,
         num_days=num_days,
         days=days_out,
     )

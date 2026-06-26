@@ -65,9 +65,9 @@ export default function Home() {
   const greeting = getGreeting()
 
   return (
-    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50 pb-28">
+    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-gray-50 to-gray-50 pb-28">
       {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-600 to-violet-600 px-6 pt-14 pb-20">
+      <div className="bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-500 px-6 pt-14 pb-20">
         <p className="text-indigo-200 text-sm font-medium">
           {greeting.icon} {greeting.text},
         </p>
@@ -79,7 +79,7 @@ export default function Home() {
 
       {/* Content */}
       <div className="flex-1 bg-gray-50 rounded-t-3xl -mt-6 px-6 pt-6 flex flex-col gap-5">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col gap-5">
+        <div className="glass glass-specular rounded-3xl p-5 flex flex-col gap-5">
           {/* Destination */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-semibold text-gray-600" htmlFor="destination">
@@ -94,7 +94,7 @@ export default function Home() {
                 onChange={(e) => setCity(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleFindPlaces()}
                 placeholder="e.g. Roma, Barcelona…"
-                className="w-full border border-gray-200 rounded-xl pl-10 pr-4 py-3 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors"
+                className="w-full border border-gray-200/70 rounded-xl pl-10 pr-4 py-3 text-sm bg-white/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-400 focus:bg-white/85 transition-colors"
               />
             </div>
           </div>
@@ -102,7 +102,7 @@ export default function Home() {
           {/* Duration */}
           <div className="flex flex-col gap-2">
             <label className="text-sm font-semibold text-gray-600">Duration</label>
-            <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+            <div className="flex items-center justify-between bg-white/50 border border-gray-200/70 rounded-xl px-4 py-2.5">
               <div className="flex items-center gap-2 text-gray-500">
                 <Calendar size={15} />
                 <span className="text-sm text-gray-700 font-semibold">
@@ -113,14 +113,14 @@ export default function Home() {
                 <button
                   onClick={decrement}
                   disabled={numDays <= 1}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-gray-600 disabled:opacity-40 shadow-sm active:scale-95 transition-transform"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/75 border border-white/70 text-gray-600 disabled:opacity-40 shadow-sm active:scale-95 transition-transform"
                 >
                   <Minus size={14} />
                 </button>
                 <button
                   onClick={increment}
                   disabled={numDays >= 14}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-gray-600 disabled:opacity-40 shadow-sm active:scale-95 transition-transform"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/75 border border-white/70 text-gray-600 disabled:opacity-40 shadow-sm active:scale-95 transition-transform"
                 >
                   <Plus size={14} />
                 </button>
@@ -144,8 +144,8 @@ export default function Home() {
                   onClick={() => setTravelMode(value)}
                   className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs font-semibold transition-all active:scale-95 ${
                     travelMode === value
-                      ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                      : 'border-gray-200 bg-gray-50 text-gray-500'
+                      ? 'border-indigo-300 bg-white/80 text-indigo-700 shadow-sm'
+                      : 'border-gray-200/70 bg-white/45 text-gray-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]'
                   }`}
                 >
                   <span className="text-lg">{emoji}</span>
@@ -157,7 +157,7 @@ export default function Home() {
         </div>
 
         {error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+          <div className="text-sm text-red-600 bg-red-50/85 backdrop-blur border border-red-100 rounded-xl px-4 py-3">
             {error}
           </div>
         )}

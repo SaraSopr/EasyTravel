@@ -76,15 +76,12 @@ export interface PoiSuggestion {
 
 export interface ItineraryDay {
   day_number: number
-  date: string
   stops: ItineraryStop[]
 }
 
 export interface Itinerary {
   itinerary_id: string
   city: string
-  start_date: string
-  end_date: string
   num_days: number
   warnings: string[]
   days: ItineraryDay[]
@@ -93,8 +90,6 @@ export interface Itinerary {
 export interface ItinerarySummary {
   itinerary_id: string
   city: string
-  start_date: string
-  end_date: string
   num_days: number
   created_at: string
   num_stops: number

@@ -126,15 +126,15 @@ export default function Profile() {
     }
   }
 
-  const inputClass = 'w-full border border-gray-200 rounded-xl px-4 py-3 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors'
+  const inputClass = 'w-full border border-white/60 rounded-xl px-4 py-3 text-sm bg-white/55 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white/85 transition-colors'
 
   return (
-    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50 pb-28">
+    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-gray-50 to-gray-50 pb-28">
       {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-600 to-violet-600 px-6 pt-14 pb-20">
+      <div className="bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-500 px-6 pt-14 pb-20">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center">
-            <span className="text-2xl font-extrabold text-white">{getInitials(user.email)}</span>
+          <div className="w-16 h-16 rounded-full glass-dark glass-specular flex items-center justify-center">
+            <span className="text-xl font-extrabold text-white">{getInitials(user.email)}</span>
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-extrabold text-white tracking-tight">{getFirstName(user.email)}</h1>
@@ -146,7 +146,7 @@ export default function Profile() {
       <div className="flex-1 bg-gray-50 rounded-t-3xl -mt-6 px-6 pt-6 flex flex-col gap-4">
 
         {/* Profile info card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col gap-4">
+        <div className="glass glass-specular rounded-3xl p-5 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <span className="text-sm font-bold text-gray-800">Profile info</span>
             {!editing ? (
@@ -182,7 +182,7 @@ export default function Profile() {
             </label>
             {editing ? (
               <div className="relative">
-                <select value={ageRange} onChange={(e) => setAgeRange(e.target.value)} className="w-full appearance-none border border-gray-200 rounded-xl px-4 py-3 pr-9 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors">
+                <select value={ageRange} onChange={(e) => setAgeRange(e.target.value)} className="w-full appearance-none border border-white/60 rounded-xl px-4 py-3 pr-9 text-sm bg-white/55 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white/85 transition-colors">
                   {AGE_RANGES.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
                 <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -201,7 +201,7 @@ export default function Profile() {
                 type="button"
                 onClick={() => setTravelWithChildren((v) => !v)}
                 className={`flex items-center justify-between border rounded-xl px-4 py-3 transition-colors ${
-                  travelWithChildren ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-gray-50'
+                  travelWithChildren ? 'border-indigo-300 bg-white/80 shadow-sm' : 'border-white/60 bg-white/45'
                 }`}
               >
                 <span className={`text-sm font-medium ${travelWithChildren ? 'text-indigo-700' : 'text-gray-400'}`}>
@@ -220,7 +220,7 @@ export default function Profile() {
         </div>
 
         {/* Travel preferences */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col gap-4">
+        <div className="glass glass-specular rounded-3xl p-5 flex flex-col gap-4">
           <span className="text-sm font-bold text-gray-800">Travel preferences</span>
           <div className="flex flex-col gap-3">
             {preferences && (Object.entries(preferences) as [keyof PreferenceVector, number][])
@@ -232,7 +232,7 @@ export default function Profile() {
                   <div key={key} className="flex items-center gap-3">
                     <span className="text-base w-5 shrink-0">{emoji}</span>
                     <span className="text-xs font-medium text-gray-600 w-20 shrink-0">{label}</span>
-                    <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                    <div className="flex-1 bg-white/55 rounded-full h-1.5 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-violet-500 h-2 rounded-full transition-all"
                         style={{ width: `${pct}%` }}
@@ -246,13 +246,13 @@ export default function Profile() {
         </div>
 
         {/* Change password */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="glass glass-specular rounded-3xl overflow-hidden">
           <button
             onClick={() => { setShowPassword((v) => !v); setPasswordError(''); setPasswordSuccess(false) }}
             className="w-full flex items-center justify-between px-5 py-4"
           >
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl bg-white/60 border border-white/60 flex items-center justify-center">
                 <Lock size={16} className="text-indigo-500" />
               </div>
               <span className="text-sm font-semibold text-gray-800">Change password</span>
@@ -261,7 +261,7 @@ export default function Profile() {
           </button>
 
           {showPassword && (
-            <form onSubmit={handleChangePassword} className="px-5 pb-5 flex flex-col gap-3 border-t border-gray-50 pt-4">
+            <form onSubmit={handleChangePassword} className="px-5 pb-5 flex flex-col gap-3 border-t border-white/45 pt-4">
               <input
                 type="password"
                 placeholder="Current password"
@@ -313,7 +313,7 @@ export default function Profile() {
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className="flex items-center justify-center gap-2 w-full bg-white border border-gray-100 shadow-sm text-gray-600 font-semibold rounded-2xl py-4 active:scale-[0.98] transition-transform"
+          className="glass glass-specular flex items-center justify-center gap-2 w-full text-gray-600 font-semibold rounded-3xl py-4 active:scale-[0.98] transition-transform"
         >
           <LogOut size={18} />
           Log out
@@ -323,19 +323,19 @@ export default function Profile() {
         {!showDeleteConfirm ? (
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center justify-center gap-2 w-full bg-red-50 border border-red-100 text-red-500 font-semibold rounded-2xl py-4 active:scale-[0.98] transition-transform"
+            className="flex items-center justify-center gap-2 w-full bg-red-50/80 backdrop-blur border border-red-100/80 text-red-500 font-semibold rounded-3xl py-4 active:scale-[0.98] transition-transform"
           >
             <Trash2 size={18} />
             Delete account
           </button>
         ) : (
-          <div className="bg-red-50 border border-red-100 rounded-2xl p-5 flex flex-col gap-3">
+          <div className="bg-red-50/85 backdrop-blur border border-red-100/80 rounded-3xl p-5 flex flex-col gap-3">
             <p className="text-sm font-semibold text-red-700">Are you sure? This cannot be undone.</p>
             {deleteError && <p className="text-sm text-red-500">{deleteError}</p>}
             <div className="flex gap-3">
               <button
                 onClick={() => { setShowDeleteConfirm(false); setDeleteError('') }}
-                className="flex-1 py-3 rounded-xl border border-gray-200 bg-white text-gray-600 text-sm font-semibold"
+                className="flex-1 py-3 rounded-xl border border-white/70 bg-white/75 text-gray-600 text-sm font-semibold"
               >
                 Cancel
               </button>

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from enum import Enum
 from typing import Literal
 
@@ -72,7 +72,6 @@ class ReplaceStopRequest(BaseModel):
 
 class ItineraryDayOut(BaseModel):
     day_number: int
-    date: date
     stops: list[ItineraryStop]
 
 
@@ -81,8 +80,6 @@ class ItineraryOut(BaseModel):
 
     itinerary_id: uuid.UUID
     city: str
-    start_date: date
-    end_date: date
     num_days: int
     warnings: list[str] = []
     days: list[ItineraryDayOut]
@@ -92,8 +89,6 @@ class ItinerarySummary(BaseModel):
     """Lightweight itinerary entry for the user's saved-itineraries list."""
     itinerary_id: uuid.UUID
     city: str
-    start_date: date
-    end_date: date
     num_days: int
     created_at: datetime
     num_stops: int       # total saved stops across all days

@@ -1,14 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { MapPin, Map, ChevronRight, CheckCircle2, Calendar } from 'lucide-react'
+import { MapPin, Map, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { listItineraries } from '@/api/endpoints'
 import type { ItinerarySummary } from '@/types'
-
-function formatRange(start: string, end: string): string {
-  const fmt = (d: string) =>
-    new Date(d).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
-  return start === end ? fmt(start) : `${fmt(start)} – ${fmt(end)}`
-}
 
 export default function Itineraries() {
   const [itineraries, setItineraries] = useState<ItinerarySummary[]>([])
@@ -82,10 +76,6 @@ export default function Itineraries() {
                 <div className="flex-1 min-w-0">
                   <p className="text-base font-bold text-gray-800 truncate">{it.city}</p>
                   <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <Calendar size={12} className="text-gray-400" />
-                      {formatRange(it.start_date, it.end_date)}
-                    </span>
                     <span>
                       {it.num_days} {it.num_days === 1 ? 'day' : 'days'} · {it.num_stops}{' '}
                       {it.num_stops === 1 ? 'stop' : 'stops'}
