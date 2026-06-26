@@ -10,11 +10,7 @@ interface ExperienceCardProps {
 
 type LucideIcon = React.ComponentType<{ size?: number; className?: string }>
 
-export default function ExperienceCard({
-  experience,
-  selected,
-  onOpen,
-}: ExperienceCardProps) {
+export default function ExperienceCard({ experience, selected, onOpen }: ExperienceCardProps) {
   const iconKey = experience.icon as keyof typeof LucideIcons
   const IconComponent =
     (LucideIcons[iconKey] as LucideIcon | undefined) ?? LucideIcons.MapPin
@@ -29,10 +25,7 @@ export default function ExperienceCard({
       }`}
     >
       {selected && (
-        <CheckCircle2
-          size={16}
-          className="absolute top-3 right-3 text-indigo-500"
-        />
+        <CheckCircle2 size={16} className="absolute top-3 right-3 text-indigo-500" />
       )}
       <div className={`p-2 rounded-xl ${selected ? 'bg-indigo-100' : 'bg-gray-100'}`}>
         <IconComponent

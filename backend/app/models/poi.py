@@ -25,6 +25,10 @@ class Poi(Base):
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lng: Mapped[float] = mapped_column(Float, nullable=False)
     types: Mapped[list | None] = mapped_column(ARRAY(String), nullable=True)
+    # Single canonical type from Places API (New); cleaner signal than the flat `types` array.
+    primary_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Short editorial description from Places API (New) `editorialSummary`; fed to the LLM stages.
+    editorial_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     user_ratings_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -46,7 +50,7 @@ class Poi(Base):
     tourism_validated_at: Mapped[datetime | None] = mapped_column(nullable=True)
     travel_category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_indoor_visitable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Feature vector esplicito (stesso ordine di user_preferences)
+    # Explicit feature vector (same order as user_preferences)
     nature: Mapped[float | None] = mapped_column(Float, nullable=True)
     culture: Mapped[float | None] = mapped_column(Float, nullable=True)
     food: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -5,12 +5,7 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import and_, or_, select
-from app.services.itinerary_planner import EXCLUDED_TYPES, FOOD_SERVICE_TYPES, HIGH_POPULARITY_TYPES
-
-_EXCLUDED_TYPES_LIST = list(EXCLUDED_TYPES)
-_HIGH_POPULARITY_TYPES_LIST = list(HIGH_POPULARITY_TYPES)
-_FOOD_SERVICE_TYPES_LIST = list(FOOD_SERVICE_TYPES)
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,9 +22,14 @@ from app.schemas.itinerary import (
     ItineraryDayOut,
     ItineraryOut,
     ItineraryStop,
+    ItinerarySummary,
+    PoiSuggestion,
+    ReplaceStopRequest,
     TravelMode,
 )
 from app.services import itinerary_planner
+from app.services import recommendation as recommendation_service
+from app.services.candidate_query import fetch_candidate_pois
 from app.services.itinerary_planner import get_user_poi_history, haversine_m, select_transport
 from app.utils.auth import get_current_user
 
@@ -66,10 +66,51 @@ def _google_maps_url(poi) -> str | None:
     return None
 
 
+async def _geocode_location(query: str, city: str) -> tuple[float, float] | None:
+    """Resolve a free-text address / hotel name to (lat, lng) via Nominatim.
+
+    Biased toward the requested city by appending it to the query. Returns None on
+    any failure — the caller then falls back to the city center, so a bad address
+    never blocks itinerary generation.
+    """
+    import httpx
+
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {"q": f"{query}, {city}", "format": "json", "limit": 1}
+    headers = {"User-Agent": "EasyTravel/1.0"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+            results = resp.json()
+        if not results:
+            return None
+        return float(results[0]["lat"]), float(results[0]["lon"])
+    except Exception as exc:
+        logger.warning("Geocoding failed for %r: %s", query, exc)
+        return None
+
+
+async def _read_travel_time(db, origin, dest) -> tuple[str, float]:
+    """Travel (transport, minutes) for a saved itinerary leg, cache-first.
+
+    Mode is chosen by the haversine heuristic; the duration comes from the real
+    travel-time cache when available, else haversine. Never calls the API on read.
+    """
+    from app.services.routes_client import get_travel_time
+
+    mode, hav_min = select_transport(haversine_m(origin.lat, origin.lng, dest.lat, dest.lng))
+    minutes, _meters = await get_travel_time(
+        db, origin, dest, itinerary_planner._SCHED_TO_DB_MODE[mode], allow_api=False
+    )
+    return mode, minutes
+
+
 def _stop_to_schema(
     stop: itinerary_planner._Stop,
     position: int,
     is_new: bool = True,
+    item_id: uuid.UUID | None = None,
 ) -> ItineraryStop:
     poi = stop.poi
     return ItineraryStop(
@@ -91,6 +132,7 @@ def _stop_to_schema(
         visit_duration_minutes=stop.visit_duration_minutes,
         visit_note=stop.visit_note,
         is_new_suggestion=is_new,
+        item_id=item_id,
     )
 
 
@@ -111,59 +153,10 @@ async def generate_itinerary(
     if city is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="City not found.")
 
-    # --- Fetch classified POIs ---
-    pois_result = await db.execute(
-        select(Poi).where(
-            Poi.city_id == city.id,
-            Poi.business_status != "CLOSED_PERMANENTLY",
-            or_(Poi.user_ratings_total >= 200, Poi.user_ratings_total.is_(None)),
-            Poi.rating >= 3.5,
-            # Either: a classified touristic activity POI, OR a food-type POI.
-            # Food POIs (restaurants, cafes, etc.) are correctly marked is_touristic=False
-            # by tourism validation (they're not sightseeing attractions), so the pipeline
-            # skips classifying them. We include them separately as meal stops.
-            or_(
-                # Activity POIs: must be classified and confirmed touristic
-                and_(
-                    Poi.confidence != "failed",
-                    Poi.nature.is_not(None),
-                    Poi.classified_at.is_not(None),
-                    or_(Poi.is_touristic.is_(None), Poi.is_touristic == True),  # noqa: E712
-                    # Exclude POIs where ANY type is in the non-touristic blacklist.
-                    or_(
-                        Poi.types.is_(None),
-                        Poi.types == [],
-                        ~Poi.types.overlap(_EXCLUDED_TYPES_LIST),
-                    ),
-                    # High-popularity types (stadium, race_track) require ≥5000 ratings.
-                    or_(
-                        Poi.types.is_(None),
-                        Poi.types == [],
-                        ~Poi.types.overlap(_HIGH_POPULARITY_TYPES_LIST),
-                        Poi.user_ratings_total >= 5000,
-                    ),
-                ),
-                # Food POIs: notable restaurants validated as touristic by the tourism
-                # validator. is_touristic=False POIs (chains, fast food) are excluded.
-                # Legacy unvalidated POIs (is_touristic IS NULL) are kept as fallback.
-                and_(
-                    Poi.types.is_not(None),
-                    Poi.types.overlap(_FOOD_SERVICE_TYPES_LIST),
-                    or_(Poi.is_touristic.is_(None), Poi.is_touristic == True),  # noqa: E712
-                ),
-            ),
-            # Family filter: when traveling with children, exclude POIs explicitly
-            # marked as not suitable for children. Legacy/unvalidated POIs (NULL) are kept.
-            *(
-                [or_(
-                    Poi.suitable_for_children.is_(None),
-                    Poi.suitable_for_children == True,  # noqa: E712
-                )]
-                if payload.travel_mode == TravelMode.family else []
-            ),
-        )
+    # --- Fetch classified POIs (shared with the evaluation harness) ---
+    candidate_places = await fetch_candidate_pois(
+        db, city.id, travel_with_children=payload.travel_mode == TravelMode.family
     )
-    candidate_places = pois_result.scalars().all()
     logger.info(
         "POIs after all filters: %d (popularity + type blacklist + tourism filter applied)",
         len(candidate_places),
@@ -203,6 +196,21 @@ async def generate_itinerary(
         len(confirmed_visited_ids), len(previously_suggested_ids),
     )
 
+    # --- Resolve optional depot (start/end location) ---
+    start_lat = start_lng = end_lat = end_lng = None
+    if payload.start_location:
+        coords = await _geocode_location(payload.start_location, city.name)
+        if coords is not None:
+            start_lat, start_lng = coords
+        else:
+            logger.warning("Could not geocode start_location %r — using city center", payload.start_location)
+    if payload.end_location:
+        coords = await _geocode_location(payload.end_location, city.name)
+        if coords is not None:
+            end_lat, end_lng = coords
+        else:
+            logger.warning("Could not geocode end_location %r — using start/center", payload.end_location)
+
     # --- Plan ---
     all_days, warnings = await itinerary_planner.generate(
         user_prefs=user_prefs,
@@ -217,6 +225,12 @@ async def generate_itinerary(
         travel_with_children=payload.travel_mode == TravelMode.family,
         age_range=current_user.age_range,
         travel_mode=payload.travel_mode.value,
+        session=db,
+        solver=payload.solver,
+        start_lat=start_lat,
+        start_lng=start_lng,
+        end_lat=end_lat,
+        end_lng=end_lng,
     )
 
     # --- Persist ---
@@ -229,6 +243,9 @@ async def generate_itinerary(
         end_date=end_date,
     )
     db.add(itinerary)
+    # Maps (day_number, position) -> persisted item id, so the response can expose
+    # item_id for in-itinerary edits (replace/remove) right after generation.
+    item_ids: dict[tuple[int, int], uuid.UUID] = {}
     try:
         await db.flush()
         for day_num, day_stops in enumerate(all_days, start=1):
@@ -242,6 +259,7 @@ async def generate_itinerary(
                     departure_time=stop.departure.time(),
                 )
                 db.add(item)
+                item_ids[(day_num, pos)] = item.id
         await db.commit()
     except Exception as exc:
         await db.rollback()
@@ -257,7 +275,11 @@ async def generate_itinerary(
     for day_idx, day_stops in enumerate(all_days):
         day_date = today + timedelta(days=day_idx)
         stops_out = [
-            _stop_to_schema(s, pos, is_new=s.poi.id not in seen_ids)
+            _stop_to_schema(
+                s, pos,
+                is_new=s.poi.id not in seen_ids,
+                item_id=item_ids.get((day_idx + 1, pos)),
+            )
             for pos, s in enumerate(day_stops, start=1)
         ]
         days_out.append(ItineraryDayOut(day_number=day_idx + 1, date=day_date, stops=stops_out))
@@ -271,6 +293,40 @@ async def generate_itinerary(
         warnings=warnings,
         days=days_out,
     )
+
+
+@router.get("", response_model=list[ItinerarySummary])
+async def list_itineraries(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """All itineraries generated by the current user, newest first.
+
+    Returns a lightweight summary per itinerary (no stops); the full itinerary
+    is fetched on demand via GET /itineraries/{id}.
+    """
+    result = await db.execute(
+        select(Itinerary)
+        .options(selectinload(Itinerary.items))
+        .where(Itinerary.user_id == current_user.id)
+        .order_by(Itinerary.created_at.desc())
+    )
+    itineraries = result.scalars().all()
+
+    summaries: list[ItinerarySummary] = []
+    for it in itineraries:
+        num_days = (it.end_date - it.start_date).days + 1
+        summaries.append(ItinerarySummary(
+            itinerary_id=it.id,
+            city=it.city,
+            start_date=it.start_date,
+            end_date=it.end_date,
+            num_days=num_days,
+            created_at=it.created_at,
+            num_stops=len(it.items),
+            num_visited=sum(1 for item in it.items if item.visited_at is not None),
+        ))
+    return summaries
 
 
 @router.get("/{itinerary_id}", response_model=ItineraryOut)
@@ -301,14 +357,12 @@ async def get_itinerary(
         day_date = itinerary.start_date + timedelta(days=day_num - 1)
         items = days_map[day_num]
         stops_out: list[ItineraryStop] = []
-        prev_lat: float | None = None
-        prev_lng: float | None = None
+        prev_poi: object | None = None
 
         for pos, item in enumerate(items, start=1):
             poi = item.place
-            if prev_lat is not None and prev_lng is not None:
-                dist = haversine_m(prev_lat, prev_lng, poi.lat, poi.lng)
-                transport, travel_min = select_transport(dist)
+            if prev_poi is not None:
+                transport, travel_min = await _read_travel_time(db, prev_poi, poi)
             else:
                 transport, travel_min = None, 0.0
 
@@ -338,8 +392,9 @@ async def get_itinerary(
                 visit_duration_minutes=visit_dur,
                 visit_mode=vm,
                 visit_note=vn,
+                item_id=item.id,
             ))
-            prev_lat, prev_lng = poi.lat, poi.lng
+            prev_poi = poi
 
         days_out.append(ItineraryDayOut(day_number=day_num, date=day_date, stops=stops_out))
 
@@ -418,5 +473,198 @@ async def undo_check_in(
 
     item.visited_at = None
     db.add(item)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ─────────────────────────────────────────────
+# In-itinerary editing: swap / remove a suggested place
+# ─────────────────────────────────────────────
+
+async def _load_owned_item(db, itinerary_id, item_id, user_id) -> ItineraryItem:
+    """Fetch an itinerary item (with its place) verifying it belongs to the user."""
+    result = await db.execute(
+        select(ItineraryItem)
+        .options(selectinload(ItineraryItem.place))
+        .join(Itinerary, ItineraryItem.itinerary_id == Itinerary.id)
+        .where(
+            ItineraryItem.id == item_id,
+            ItineraryItem.itinerary_id == itinerary_id,
+            Itinerary.user_id == user_id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary item not found.")
+    return item
+
+
+async def _load_user_prefs(db, user_id) -> UserPreference:
+    pref_result = await db.execute(
+        select(UserPreference).where(UserPreference.user_id == user_id)
+    )
+    pref = pref_result.scalar_one_or_none()
+    if pref is None:
+        pref = UserPreference(user_id=user_id)
+        db.add(pref)
+    return pref
+
+
+@router.get(
+    "/{itinerary_id}/items/{item_id}/alternatives",
+    response_model=list[PoiSuggestion],
+)
+async def get_stop_alternatives(
+    itinerary_id: uuid.UUID,
+    item_id: uuid.UUID,
+    limit: int = 12,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ranked alternative POIs for a stop, to let the user swap a suggestion.
+
+    Candidates are the same eligible POIs used for generation, minus everything
+    already in this itinerary, ranked by cosine similarity to the user's
+    preference vector with a boost for matching the slot's travel category.
+    """
+    item = await _load_owned_item(db, itinerary_id, item_id, current_user.id)
+
+    itinerary = await db.get(Itinerary, itinerary_id)
+    city_result = await db.execute(select(City).where(City.name.ilike(itinerary.city)))
+    city = city_result.scalar_one_or_none()
+    if city is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="City not found.")
+
+    user_prefs = await _load_user_prefs(db, current_user.id)
+
+    candidates = await fetch_candidate_pois(
+        db, city.id, travel_with_children=current_user.travel_with_children
+    )
+
+    # Exclude POIs already present anywhere in this itinerary.
+    used_result = await db.execute(
+        select(ItineraryItem.place_id).where(ItineraryItem.itinerary_id == itinerary_id)
+    )
+    used_ids = set(used_result.scalars().all())
+
+    ranked = recommendation_service.rank_pois(user_prefs, candidates)
+    current_category = item.place.travel_category
+    # Same-category alternatives first, then by similarity.
+    ranked.sort(
+        key=lambda ps: (ps[0].travel_category == current_category, ps[1]),
+        reverse=True,
+    )
+
+    out: list[PoiSuggestion] = []
+    for poi, sim in ranked:
+        if poi.id in used_ids:
+            continue
+        out.append(PoiSuggestion(
+            poi_id=poi.id,
+            name=poi.name,
+            address=poi.address,
+            lat=poi.lat,
+            lng=poi.lng,
+            travel_category=poi.travel_category,
+            rating=poi.rating,
+            photo_reference=poi.photo_reference,
+            google_maps_url=_google_maps_url(poi),
+            similarity=round(sim, 4),
+        ))
+        if len(out) >= limit:
+            break
+    return out
+
+
+@router.put(
+    "/{itinerary_id}/items/{item_id}",
+    response_model=CheckInResponse,
+)
+async def replace_stop(
+    itinerary_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: ReplaceStopRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Swap the POI in a stop for a user-chosen alternative.
+
+    Keeps the slot's time window; travel times are recomputed live on read. The
+    edit is implicit feedback: the profile moves toward the chosen POI and away
+    from the replaced one.
+    """
+    item = await _load_owned_item(db, itinerary_id, item_id, current_user.id)
+    old_poi = item.place
+
+    new_poi = await db.get(Poi, body.poi_id)
+    if new_poi is None or new_poi.city_id != old_poi.city_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid replacement POI.")
+
+    # Reject duplicates already in the itinerary.
+    dup_result = await db.execute(
+        select(ItineraryItem).where(
+            ItineraryItem.itinerary_id == itinerary_id,
+            ItineraryItem.place_id == body.poi_id,
+            ItineraryItem.id != item_id,
+        )
+    )
+    if dup_result.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That place is already in your itinerary.")
+
+    item.place_id = new_poi.id
+    item.visited_at = None  # a swapped-in place hasn't been visited
+
+    user_prefs = await _load_user_prefs(db, current_user.id)
+    recommendation_service.nudge_user_preferences(user_prefs, reward=new_poi, penalty=old_poi)
+
+    db.add_all([item, user_prefs])
+    await db.commit()
+
+    return CheckInResponse(
+        item_id=item.id,
+        poi_id=new_poi.id,
+        poi_name=new_poi.name,
+        visited_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+
+
+@router.delete(
+    "/{itinerary_id}/items/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_stop(
+    itinerary_id: uuid.UUID,
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a suggested stop and shift the rest of the day up by one position.
+
+    Removing a place is implicit negative feedback: the profile moves away from
+    that POI's features.
+    """
+    item = await _load_owned_item(db, itinerary_id, item_id, current_user.id)
+    removed_poi = item.place
+    day_number = item.day_number
+    position = item.position
+
+    user_prefs = await _load_user_prefs(db, current_user.id)
+    recommendation_service.nudge_user_preferences(user_prefs, penalty=removed_poi)
+
+    await db.delete(item)
+
+    # Close the gap so positions stay contiguous within the day.
+    later_result = await db.execute(
+        select(ItineraryItem).where(
+            ItineraryItem.itinerary_id == itinerary_id,
+            ItineraryItem.day_number == day_number,
+            ItineraryItem.position > position,
+        )
+    )
+    for later in later_result.scalars().all():
+        later.position -= 1
+        db.add(later)
+
+    db.add(user_prefs)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

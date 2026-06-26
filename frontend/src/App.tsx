@@ -7,7 +7,9 @@ import Onboarding from '@/pages/Onboarding'
 import Home from '@/pages/Home'
 import Recommendations from '@/pages/Recommendations'
 import Itinerary from '@/pages/Itinerary'
+import Itineraries from '@/pages/Itineraries'
 import Profile from '@/pages/Profile'
+import Evaluation from '@/pages/Evaluation'
 
 export default function App() {
   return (
@@ -16,6 +18,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/eval" element={<Evaluation />} />
 
         <Route element={<ProtectedRoute />}>
           <Route path="/onboarding" element={<Onboarding />} />
@@ -33,6 +36,15 @@ export default function App() {
             element={
               <>
                 <Recommendations />
+                <BottomNav />
+              </>
+            }
+          />
+          <Route
+            path="/itineraries"
+            element={
+              <>
+                <Itineraries />
                 <BottomNav />
               </>
             }

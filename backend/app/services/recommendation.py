@@ -25,6 +25,40 @@ def build_user_vector(feature_vectors: list[dict]) -> dict[str, float]:
     return averaged
 
 
+# Implicit-feedback learning rate for in-itinerary edits. Small enough that a
+# single swap nudges the profile without overwriting the onboarding signal.
+PREFERENCE_LEARNING_RATE = 0.15
+
+
+def nudge_user_preferences(
+    pref,
+    *,
+    reward: "Poi | None" = None,
+    penalty: "Poi | None" = None,
+    lr: float = PREFERENCE_LEARNING_RATE,
+) -> None:
+    """Update a UserPreference in place from an itinerary edit (implicit feedback).
+
+    When the user keeps/adds a POI (`reward`) we move the profile toward that POI's
+    feature vector; when they remove/replace one (`penalty`) we move slightly away.
+    Each feature is an EMA step, clamped to [0, 1] to stay comparable with the
+    onboarding-built vector. Mutates `pref`; the caller commits.
+    """
+    for f in FEATURES:
+        cur = getattr(pref, f) or 0.0
+        if reward is not None:
+            rv = getattr(reward, f)
+            if rv is not None:
+                cur += lr * (rv - cur)
+        if penalty is not None:
+            pv = getattr(penalty, f)
+            if pv is not None:
+                # Push away from the rejected POI's features, half-strength so a
+                # removal is a weaker signal than an explicit pick.
+                cur -= lr * 0.5 * pv
+        setattr(pref, f, max(0.0, min(1.0, cur)))
+
+
 def rank_pois(
     user_prefs: "PreferenceVector",
     pois: list["Poi"],

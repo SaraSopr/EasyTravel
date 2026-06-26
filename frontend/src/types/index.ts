@@ -61,6 +61,19 @@ export interface ItineraryStop {
   item_id: string | null
 }
 
+export interface PoiSuggestion {
+  poi_id: string
+  name: string
+  address: string | null
+  lat: number
+  lng: number
+  travel_category: string | null
+  rating: number | null
+  photo_reference: string | null
+  google_maps_url: string | null
+  similarity: number
+}
+
 export interface ItineraryDay {
   day_number: number
   date: string
@@ -75,4 +88,15 @@ export interface Itinerary {
   num_days: number
   warnings: string[]
   days: ItineraryDay[]
+}
+
+export interface ItinerarySummary {
+  itinerary_id: string
+  city: string
+  start_date: string
+  end_date: string
+  num_days: number
+  created_at: string
+  num_stops: number
+  num_visited: number
 }

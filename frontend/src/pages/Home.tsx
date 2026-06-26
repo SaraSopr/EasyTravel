@@ -62,25 +62,27 @@ export default function Home() {
     }
   }
 
+  const greeting = getGreeting()
+
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50 pb-28">
       {/* Header */}
       <div className="bg-gradient-to-br from-indigo-600 to-violet-600 px-6 pt-14 pb-20">
-        <p className="text-indigo-200 text-lg font-medium">
-          {getGreeting().icon} {getGreeting().text},
+        <p className="text-indigo-200 text-sm font-medium">
+          {greeting.icon} {greeting.text},
         </p>
-        <h1 className="text-3xl font-bold text-white mt-3">
-          {user ? getFirstName(user.email) : 'Traveller'} ✈️
+        <h1 className="text-3xl font-extrabold text-white mt-2 tracking-tight">
+          {user ? getFirstName(user.email) : 'Traveller'}
         </h1>
-        <p className="text-indigo-200 text-lg mt-3">Where are you off to next?</p>
+        <p className="text-indigo-200 text-base mt-1.5">Where are you off to? ✈️</p>
       </div>
 
-      {/* Search card */}
+      {/* Content */}
       <div className="flex-1 bg-gray-50 rounded-t-3xl -mt-6 px-6 pt-6 flex flex-col gap-5">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col gap-5">
           {/* Destination */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide" htmlFor="destination">
+            <label className="text-sm font-semibold text-gray-600" htmlFor="destination">
               Destination
             </label>
             <div className="relative">
@@ -97,15 +99,13 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Days stepper */}
+          {/* Duration */}
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Duration
-            </label>
+            <label className="text-sm font-semibold text-gray-600">Duration</label>
             <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
               <div className="flex items-center gap-2 text-gray-500">
                 <Calendar size={15} />
-                <span className="text-sm text-gray-700 font-medium">
+                <span className="text-sm text-gray-700 font-semibold">
                   {numDays} {numDays === 1 ? 'day' : 'days'}
                 </span>
               </div>
@@ -130,9 +130,7 @@ export default function Home() {
 
           {/* Travel mode */}
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Travelling with
-            </label>
+            <label className="text-sm font-semibold text-gray-600">Travelling with</label>
             <div className="grid grid-cols-4 gap-2">
               {([
                 { value: 'solo',    emoji: '🧍', label: 'Solo'    },
@@ -156,8 +154,6 @@ export default function Home() {
               ))}
             </div>
           </div>
-
-
         </div>
 
         {error && (
@@ -169,7 +165,7 @@ export default function Home() {
         <button
           onClick={handleFindPlaces}
           disabled={!city.trim() || loading}
-          className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl py-4 disabled:opacity-50 shadow-md shadow-indigo-200 active:scale-[0.98] transition-transform"
+          className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl py-4 disabled:opacity-50 shadow-md shadow-indigo-200 active:scale-[0.98] transition-all"
         >
           {loading ? (
             <Loader2 size={18} className="animate-spin" />

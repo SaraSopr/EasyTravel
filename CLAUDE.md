@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # EasyTravel — Monorepo
 
 This repo contains both the backend (FastAPI) and frontend (React/Vite) for EasyTravel.
@@ -29,3 +33,5 @@ npm run dev
 
 - **Frontend**: Vercel — set Root Directory to `frontend`
 - **Backend + DB**: Railway — set Root Directory to `backend`
+
+

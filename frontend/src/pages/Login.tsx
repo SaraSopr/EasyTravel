@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, Plane, Mail, Lock, AlertCircle } from 'lucide-react'
+import { Loader2, Mail, Lock, AlertCircle } from 'lucide-react'
 import axios from 'axios'
 import { login } from '@/api/endpoints'
 import useAuthStore from '@/store/useAuthStore'
@@ -46,11 +46,9 @@ export default function Login() {
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50">
       {/* Hero */}
       <div className="bg-gradient-to-br from-indigo-600 to-violet-600 px-6 pt-16 pb-20 flex flex-col items-center text-center">
-        <div className="bg-white/20 rounded-2xl p-4 mb-4">
-          <Plane size={32} className="text-white" />
-        </div>
-        <h1 className="text-3xl font-bold text-white">EasyTravel</h1>
-        <p className="text-indigo-200 text-sm mt-1">Your AI travel planner</p>
+        <span className="text-4xl mb-3">✈️</span>
+        <h1 className="text-3xl font-extrabold text-white tracking-tight">EasyTravel</h1>
+        <p className="text-indigo-200 text-sm mt-1.5 font-medium">Your AI travel planner</p>
       </div>
 
       {/* Card */}
@@ -60,9 +58,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-gray-700" htmlFor="email">
-              Email
-            </label>
+            <label className="text-sm font-semibold text-gray-700" htmlFor="email">Email</label>
             <div className="relative">
               <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -79,9 +75,7 @@ export default function Login() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-gray-700" htmlFor="password">
-              Password
-            </label>
+            <label className="text-sm font-semibold text-gray-700" htmlFor="password">Password</label>
             <div className="relative">
               <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -122,9 +116,7 @@ export default function Login() {
 
         <p className="text-sm text-center text-gray-400 mt-6">
           Don't have an account?{' '}
-          <Link to="/register" className="text-indigo-600 font-semibold">
-            Register
-          </Link>
+          <Link to="/register" className="text-indigo-600 font-semibold">Register</Link>
         </p>
       </div>
     </div>

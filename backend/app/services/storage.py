@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -34,6 +35,60 @@ def _get_r2_client():
 def get_public_url(place_id: str, city: str) -> str:
     key = f"experiences/{city}/{place_id}.jpg"
     return f"{settings.cloudflare_r2_public_url}/{key}"
+
+
+def _poi_key(place_id: str) -> str:
+    return f"pois/{place_id}.jpg"
+
+
+def get_poi_public_url(place_id: str) -> str:
+    return f"{settings.cloudflare_r2_public_url}/{_poi_key(place_id)}"
+
+
+async def poi_photo_cached_url(place_id: str) -> str | None:
+    """Return the public R2 URL for a POI photo if it's already stored, else None."""
+    if not _r2_configured():
+        return None
+
+    def _head() -> bool:
+        client = _get_r2_client()
+        try:
+            client.head_object(Bucket=settings.cloudflare_r2_bucket_name, Key=_poi_key(place_id))
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                return False
+            raise
+
+    try:
+        exists = await asyncio.to_thread(_head)
+    except Exception:
+        logger.exception("r2 head failed place_id=%s", place_id)
+        return None
+    return get_poi_public_url(place_id) if exists else None
+
+
+async def store_poi_photo(place_id: str, image_bytes: bytes) -> str | None:
+    """Upload already-fetched POI photo bytes to R2. Returns the public URL or None."""
+    if not _r2_configured():
+        return None
+
+    def _put() -> None:
+        client = _get_r2_client()
+        client.put_object(
+            Bucket=settings.cloudflare_r2_bucket_name,
+            Key=_poi_key(place_id),
+            Body=image_bytes,
+            ContentType="image/jpeg",
+        )
+
+    try:
+        await asyncio.to_thread(_put)
+    except Exception:
+        logger.exception("r2 poi upload failed place_id=%s", place_id)
+        return None
+    logger.info("r2 poi photo uploaded place_id=%s bytes=%d", place_id, len(image_bytes))
+    return get_poi_public_url(place_id)
 
 
 async def upload_photo_from_url(photo_url: str, place_id: str, city: str) -> str | None:

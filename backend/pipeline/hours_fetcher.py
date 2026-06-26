@@ -67,34 +67,66 @@ def needs_hours_fetch(poi: Poi) -> bool:
     return False
 
 
+def _normalize_periods(new_periods: list[dict]) -> list[dict]:
+    """Convert Places API (New) period shape to the legacy shape the planner reads.
+
+    New:    {"open": {"day": 0, "hour": 9, "minute": 0}, "close": {...}}
+    Legacy: {"open": {"day": 0, "time": "0900"}, "close": {"day": 0, "time": "1700"}}
+
+    The day convention is identical (0=Sunday … 6=Saturday), so only the time
+    representation changes. See itinerary_planner._is_open.
+    """
+    def _point(p: dict | None) -> dict | None:
+        if not p:
+            return None
+        return {
+            "day": p.get("day"),
+            "time": f"{int(p.get('hour', 0)):02d}{int(p.get('minute', 0)):02d}",
+        }
+
+    out: list[dict] = []
+    for period in new_periods:
+        entry: dict = {}
+        op = _point(period.get("open"))
+        cl = _point(period.get("close"))
+        if op:
+            entry["open"] = op
+        if cl:
+            entry["close"] = cl
+        if entry:
+            out.append(entry)
+    return out
+
+
 async def fetch_place_details_hours(
     client: httpx.AsyncClient,
     google_place_id: str,
     api_key: str,
 ) -> dict | None:
     """
-    Call Google Places Details API requesting only opening_hours field.
-    Returns parsed hours dict or None on error/missing data.
-    Cost: 1 Basic Data call per POI.
+    Call Place Details (New) requesting only the regularOpeningHours field.
+    Returns parsed hours dict (legacy shape) or None on error/missing data.
+    Cost: 1 Place Details (New) call per POI, billed by the requested field mask.
     """
-    url = "https://maps.googleapis.com/maps/api/place/details/json"
-    params = {
-        "place_id": google_place_id,
-        "fields": "opening_hours",
-        "key": api_key,
+    url = f"https://places.googleapis.com/v1/places/{google_place_id}"
+    headers = {
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "regularOpeningHours",
     }
     try:
-        resp = await client.get(url, params=params)
-        data = resp.json()
-        if data.get("status") not in ("OK", "ZERO_RESULTS"):
-            logger.warning(f"Place Details error for {google_place_id}: {data.get('status')}")
+        resp = await client.get(url, headers=headers)
+        if resp.status_code != 200:
+            logger.warning(
+                f"Place Details error for {google_place_id}: "
+                f"{resp.status_code} {resp.text[:200]}"
+            )
             return None
-        hours = data.get("result", {}).get("opening_hours", {})
+        hours = resp.json().get("regularOpeningHours", {})
         if not hours:
             return {}  # explicitly empty: no hours available
         return {
-            "periods": hours.get("periods", []),
-            "weekday_text": hours.get("weekday_text", []),
+            "periods": _normalize_periods(hours.get("periods", [])),
+            "weekday_text": hours.get("weekdayDescriptions", []),
         }
     except Exception as e:
         logger.warning(f"Place Details request failed for {google_place_id}: {e}")

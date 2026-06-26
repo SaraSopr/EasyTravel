@@ -87,6 +87,32 @@ def _render_classify_batch_system() -> str:
     return _render("classify_system.jinja2", batch=True)
 
 
+# OpenAI structured-output schema for batch classification (root must be an object,
+# so the array of per-POI results is wrapped under "results").
+_CATEGORY_ENUM = ["culture", "nature", "food", "adventure", "nightlife", "relax", "family"]
+
+
+def _classify_response_format() -> dict:
+    item = {
+        "type": "object",
+        "properties": {
+            "travel_category": {"type": "string", "enum": _CATEGORY_ENUM},
+            "feature_vector": {"type": "array", "items": {"type": "number"}},
+            "is_indoor_visitable": {"type": "boolean"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["travel_category", "feature_vector", "is_indoor_visitable", "reasoning"],
+        "additionalProperties": False,
+    }
+    schema = {
+        "type": "object",
+        "properties": {"results": {"type": "array", "items": item}},
+        "required": ["results"],
+        "additionalProperties": False,
+    }
+    return {"type": "json_schema", "name": "poi_classification", "schema": schema, "strict": True}
+
+
 def _render_arbitrate_system() -> str:
     return _render("arbitrate_system.jinja2")
 
@@ -214,19 +240,23 @@ async def _call_llm_batch(
     expected_count: int,
     role: str = "classifier_batch",
     poi_names: list[str] | None = None,
+    response_format: dict | None = None,
 ) -> list[dict | None] | None:
     """Call LLM expecting a JSON array of `expected_count` items."""
     for attempt in range(MAX_RETRIES + 1):
         t0 = time.monotonic()
         raw: str | None = None
         try:
-            raw, in_tok, out_tok = await backend.complete(system, user)
+            raw, in_tok, out_tok = await backend.complete(system, user, response_format=response_format)
             latency_ms = int((time.monotonic() - t0) * 1000)
             _log_llm_call(role=role, poi=poi_names, backend=backend, system=system, user=user,
                           response=raw, input_tokens=in_tok, output_tokens=out_tok,
                           latency_ms=latency_ms, attempt=attempt + 1, error=None)
 
             parsed = json.loads(_extract_json(raw))
+            # Structured output wraps the array in {"results": [...]} (root must be object).
+            if isinstance(parsed, dict) and "results" in parsed:
+                parsed = parsed["results"]
             if not isinstance(parsed, list):
                 raise ValueError(f"Atteso JSON array, ricevuto {type(parsed).__name__}")
 
@@ -300,9 +330,16 @@ async def classify_batch(
     n = len(pois)
     poi_names = [p.name for p in pois]
 
+    from app.config import settings as _settings
+    response_format = (
+        _classify_response_format()
+        if _settings.openai_structured_output and _settings.pipeline_llm_backend == "openai"
+        else None
+    )
+
     r1_list, r2_list = await asyncio.gather(
-        _call_llm_batch(backend, system, user, n, role="llm1_batch", poi_names=poi_names),
-        _call_llm_batch(backend, system, user, n, role="llm2_batch", poi_names=poi_names),
+        _call_llm_batch(backend, system, user, n, role="llm1_batch", poi_names=poi_names, response_format=response_format),
+        _call_llm_batch(backend, system, user, n, role="llm2_batch", poi_names=poi_names, response_format=response_format),
     )
 
     results: list[dict | None] = [None] * n

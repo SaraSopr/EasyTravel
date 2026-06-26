@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import get_db
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+_optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -38,7 +39,7 @@ def create_access_token(data: dict) -> str:
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token: str | None = Depends(_optional_oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.token_blacklist import TokenBlacklist
@@ -49,6 +50,15 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    if token is None or (settings.dev_mode and token == "dev"):
+        if settings.dev_mode and settings.dev_user_email:
+            result = await db.execute(select(User).where(User.email == settings.dev_user_email))
+            dev_user = result.scalar_one_or_none()
+            if dev_user:
+                return dev_user
+        raise credentials_exception
+
     try:
         payload = jwt.decode(
             token, settings.secret_key, algorithms=[settings.algorithm]

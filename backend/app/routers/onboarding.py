@@ -96,24 +96,27 @@ _jinja_env = Environment(
 )
 
 
-async def fetch_from_anthropic_with_tools(city: str, max_results: int = 10) -> list[dict]:
-    """Fetch experiences from Claude Sonnet with web search tool use."""
-    if not settings.anthropic_api_key:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+_EXPERIENCE_MODEL = "gpt-5.4-mini"
+
+
+async def fetch_experiences_with_web_search(city: str, max_results: int = 10) -> list[dict]:
+    """Fetch experiences from gpt-5.4-mini with web search tool use."""
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
 
     from pipeline.llm_client import get_backend
 
     template = _jinja_env.get_template("experience_discovery_prompt.jinja2")
     user_msg = template.render(city=city, max_results=max_results)
 
-    backend = get_backend("anthropic", "claude-sonnet-4-6", tool_use=True)
+    backend = get_backend("openai", _EXPERIENCE_MODEL, tool_use=True)
 
-    logger.info("anthropic sonnet request city=%s max_results=%d (with web search)", city, max_results)
+    logger.info("experience discovery request city=%s max_results=%d (with web search)", city, max_results)
     t0 = time.monotonic()
     try:
         raw_text, in_tokens, out_tokens = await backend.complete("", user_msg)
     except Exception:
-        logger.exception("anthropic web search API error city=%s", city)
+        logger.exception("experience web search API error city=%s", city)
         raise
 
     latency_ms = int((time.monotonic() - t0) * 1000)
@@ -124,8 +127,8 @@ async def fetch_from_anthropic_with_tools(city: str, max_results: int = 10) -> l
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", raw_text, re.DOTALL)
         if not match:
-            logger.error("anthropic unparseable response city=%s text=%s", city, raw_text[:200])
-            raise HTTPException(status_code=502, detail="Claude returned unparseable response")
+            logger.error("experience unparseable response city=%s text=%s", city, raw_text[:200])
+            raise HTTPException(status_code=502, detail="LLM returned unparseable response")
         data = json.loads(match.group())
 
     experiences = data.get("experiences", [])
@@ -133,7 +136,7 @@ async def fetch_from_anthropic_with_tools(city: str, max_results: int = 10) -> l
         raise HTTPException(status_code=502, detail="Response missing 'experiences' array")
 
     logger.info(
-        "anthropic response city=%s experiences=%d latency_ms=%d tokens_in=%d tokens_out=%d",
+        "experience response city=%s experiences=%d latency_ms=%d tokens_in=%d tokens_out=%d",
         city, len(experiences), latency_ms, in_tokens, out_tokens,
     )
 
@@ -144,7 +147,7 @@ async def fetch_from_anthropic_with_tools(city: str, max_results: int = 10) -> l
         try:
             async with AsyncSessionLocal() as session:
                 session.add(LlmLog(
-                    model_name="claude-sonnet-4-6+web_search",
+                    model_name=f"{_EXPERIENCE_MODEL}+web_search",
                     prompt=f"city={city}, max_results={max_results}",
                     response=", ".join(names),
                     latency_ms=latency_ms,
@@ -168,60 +171,59 @@ async def search_google_places(query: str, city: str) -> dict | None:
 
     key = settings.google_places_api_key
 
+    # Places API (New) Text Search returns full place objects in one call; the
+    # field mask selects exactly the fields we need (and drives billing).
+    field_mask = ",".join([
+        "places.id",
+        "places.displayName",
+        "places.location",
+        "places.formattedAddress",
+        "places.internationalPhoneNumber",
+        "places.websiteUri",
+        "places.rating",
+        "places.photos",
+    ])
     async with PLACES_SEMAPHORE, httpx.AsyncClient(timeout=15.0) as client:
-        # 1. Text Search to get place_id
-        ts_resp = await client.get(
-            "https://maps.googleapis.com/maps/api/place/textsearch/json",
-            params={"query": query, "key": key},
-        )
-        ts_resp.raise_for_status()
-        ts_data = ts_resp.json()
-
-        results = ts_data.get("results", [])
-        if not results:
-            return None
-
-        place_id = results[0].get("place_id")
-        if not place_id:
-            return None
-
-        # 2. Place Details — same client, connection reused
-        det_resp = await client.get(
-            "https://maps.googleapis.com/maps/api/place/details/json",
-            params={
-                "place_id": place_id,
-                "fields": "place_id,geometry,formatted_address,formatted_phone_number,website,rating,photos",
-                "key": key,
+        ts_resp = await client.post(
+            "https://places.googleapis.com/v1/places:searchText",
+            json={"textQuery": query, "pageSize": 1},
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": field_mask,
             },
         )
-        det_resp.raise_for_status()
-        det_data = det_resp.json()
+        ts_resp.raise_for_status()
+        places = ts_resp.json().get("places", [])
 
-    result = det_data.get("result", {})
-    geometry = result.get("geometry", {}).get("location", {})
+    if not places:
+        return None
+
+    result = places[0]
+    location = result.get("location", {})
     photos = result.get("photos", [])
-    first_photo = next((p.get("photo_reference") for p in photos if p.get("photo_reference")), None)
-    final_place_id = result.get("place_id")
+    first_photo = next((p.get("name") for p in photos if p.get("name")), None)
+    final_place_id = result.get("id")
 
     # Upload photo to R2 (idempotent — skips if already stored)
     photo_url = None
     if first_photo and final_place_id:
         from app.services.storage import upload_photo_from_url
+        # Place Photos (New): resource name + /media; key passes as a query param.
         google_photo_url = (
-            f"https://maps.googleapis.com/maps/api/place/photo"
-            f"?maxwidth=800"
-            f"&photo_reference={first_photo}"
-            f"&key={settings.google_places_api_key}"
+            f"https://places.googleapis.com/v1/{first_photo}/media"
+            f"?maxWidthPx=800"
+            f"&key={key}"
         )
         photo_url = await upload_photo_from_url(google_photo_url, final_place_id, city)
 
     return {
         "google_place_id": final_place_id,
-        "latitude": geometry.get("lat"),
-        "longitude": geometry.get("lng"),
-        "address": result.get("formatted_address"),
-        "phone": result.get("formatted_phone_number"),
-        "website": result.get("website"),
+        "latitude": location.get("latitude"),
+        "longitude": location.get("longitude"),
+        "address": result.get("formattedAddress"),
+        "phone": result.get("internationalPhoneNumber"),
+        "website": result.get("websiteUri"),
         "google_rating": result.get("rating"),
         "photo_url": photo_url,
     }
@@ -321,7 +323,7 @@ async def get_experiences(
         logger.info("cache miss city=%s — calling Claude Sonnet with web search", city)
 
         # 3. Fetch from Claude Sonnet with web search tool use
-        raw_experiences = await fetch_from_anthropic_with_tools(city, max_results)
+        raw_experiences = await fetch_experiences_with_web_search(city, max_results)
 
         # Build an in-request cache from historical data to avoid re-calling Google for known places.
         local_place_cache = await _build_local_place_cache(db, city)

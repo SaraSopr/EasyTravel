@@ -1,7 +1,7 @@
 """POI pipeline — fetch from Google Places + classify with Claude/Perplexity.
 
 Usage:
-    # lat/lng opzionali: se omessi vengono risolti via Nominatim (OpenStreetMap)
+    # optional lat/lng: if omitted they are resolved via Nominatim (OpenStreetMap)
     python pipeline/pipeline.py --city "Roma" --country "Italy"
     python pipeline/pipeline.py --city "Roma" --country "Italy" --lat 41.9028 --lng 12.4964
     python pipeline/pipeline.py --city "Roma" --country "Italy" --force-refetch
@@ -47,7 +47,7 @@ async def geocode(city: str, country: str) -> tuple[float, float]:
         resp.raise_for_status()
         results = resp.json()
     if not results:
-        raise ValueError(f"Nominatim: nessun risultato per '{city}, {country}'")
+        raise ValueError(f"Nominatim: no results for '{city}, {country}'")
     lat = float(results[0]["lat"])
     lng = float(results[0]["lon"])
     return lat, lng
@@ -94,14 +94,14 @@ async def run_pipeline(
     pipeline_run_id = str(uuid_module.uuid4())
     logger.info(f"=== Pipeline start: {city_name} (run_id={pipeline_run_id}) ===")
 
-    # Geocoding automatico se lat/lng non forniti
+    # Automatic geocoding if lat/lng are not provided
     if lat is None or lng is None:
-        logger.info(f"lat/lng non specificati — geocoding via Nominatim per '{city_name}, {country}'...")
+        logger.info(f"lat/lng not specified — geocoding via Nominatim for '{city_name}, {country}'...")
         try:
             lat, lng = await geocode(city_name, country)
             logger.info(f"  → lat={lat}, lng={lng}")
         except Exception as e:
-            logger.error(f"Geocoding fallito: {e}")
+            logger.error(f"Geocoding failed: {e}")
             return
 
     async with AsyncSessionLocal() as session:
@@ -129,7 +129,7 @@ async def run_pipeline(
             )
             reset_count = len(reset_result.scalars().all())
             logger.info("  → Reset %d food POIs for re-validation", reset_count)
-            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model)
+            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model, reasoning_effort=settings.pipeline_reasoning_effort)
             validated, _, tv_failed = await validate_tourism_batch(
                 session=session,
                 city_id=city.id,
@@ -169,6 +169,7 @@ async def run_pipeline(
                 session=session,
                 force=force_refetch,
                 limit=limit,
+                country=country,
             )
             logger.info(f"  → {count} POIs upserted")
 
@@ -201,7 +202,7 @@ async def run_pipeline(
         # Step 1.5: Tourism validation
         if tourism_only:
             logger.info("--tourism-only: running tourism validation then stopping")
-            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model)
+            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model, reasoning_effort=settings.pipeline_reasoning_effort)
             await validate_tourism_batch(
                 session=session,
                 city_id=city.id,
@@ -224,7 +225,7 @@ async def run_pipeline(
                 )
                 await session.commit()
 
-            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model)
+            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model, reasoning_effort=settings.pipeline_reasoning_effort)
             validated, _, tv_failed = await validate_tourism_batch(
                 session=session,
                 city_id=city.id,
@@ -270,7 +271,7 @@ async def run_pipeline(
         # Step 3: Classify
         logger.info(f"Step 3: Classifying POIs (backend={settings.pipeline_llm_backend}, model={settings.pipeline_llm_model})...")
         try:
-            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model)
+            backend = get_backend(settings.pipeline_llm_backend, settings.pipeline_llm_model, reasoning_effort=settings.pipeline_reasoning_effort)
         except ValueError as e:
             logger.error(str(e))
             return
@@ -348,13 +349,13 @@ async def run_pipeline(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="EasyTravel POI pipeline")
-    parser.add_argument("--city", required=True, help="Nome della città")
-    parser.add_argument("--country", required=True, help="Nome del paese")
-    parser.add_argument("--lat", type=float, default=None, help="Latitudine (opzionale, risolta via Nominatim se omessa)")
-    parser.add_argument("--lng", type=float, default=None, help="Longitudine (opzionale, risolta via Nominatim se omessa)")
-    parser.add_argument("--force-refetch", action="store_true", help="Re-fetch anche se la città è stata fetchata di recente")
-    parser.add_argument("--classify-only", action="store_true", help="Salta il fetch, classifica solo i POI esistenti")
-    parser.add_argument("--limit", type=int, default=None, help="Numero massimo di POI da fetchare (utile per test)")
+    parser.add_argument("--city", required=True, help="City name")
+    parser.add_argument("--country", required=True, help="Country name")
+    parser.add_argument("--lat", type=float, default=None, help="Latitude (optional, resolved via Nominatim if omitted)")
+    parser.add_argument("--lng", type=float, default=None, help="Longitude (optional, resolved via Nominatim if omitted)")
+    parser.add_argument("--force-refetch", action="store_true", help="Re-fetch even if the city was fetched recently")
+    parser.add_argument("--classify-only", action="store_true", help="Skip fetch, classify only existing POIs")
+    parser.add_argument("--limit", type=int, default=None, help="Maximum number of POIs to fetch (useful for tests)")
     parser.add_argument(
         "--skip-hours",
         action="store_true",
@@ -389,7 +390,7 @@ def main() -> None:
         "--min-ratings",
         type=int,
         default=None,
-        help="Classifica solo POI con user_ratings_total >= N (es. --min-ratings 500)",
+        help="Classify only POIs with user_ratings_total >= N (e.g. --min-ratings 500)",
     )
     parser.add_argument(
         "--food-tourism",

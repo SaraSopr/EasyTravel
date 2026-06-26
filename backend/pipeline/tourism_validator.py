@@ -69,11 +69,44 @@ def _extract_json(raw: str) -> str:
     return cleaned.strip()
 
 
-async def _call_llm(backend, system_prompt: str, poi: Poi, city_name: str) -> dict:
+def _tourism_response_format() -> dict:
+    """OpenAI structured-output schema for a tourism validation decision."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "is_touristic": {"type": "boolean"},
+            "visit_type": {"type": ["string", "null"]},
+            "duration_minutes": {"type": ["integer", "null"]},
+            "suitable_for_children": {"type": ["boolean", "null"]},
+            "confidence": {"type": "string"},
+            "reasoning": {"type": "string"},
+        },
+        "required": [
+            "is_touristic", "visit_type", "duration_minutes",
+            "suitable_for_children", "confidence", "reasoning",
+        ],
+        "additionalProperties": False,
+    }
+    return {"type": "json_schema", "name": "poi_tourism", "schema": schema, "strict": True}
+
+
+def _structured_format_if_enabled() -> dict | None:
+    from app.config import settings
+    if settings.openai_structured_output and settings.pipeline_llm_backend == "openai":
+        return _tourism_response_format()
+    return None
+
+
+async def _call_llm(
+    backend, system_prompt: str, poi: Poi, city_name: str,
+    response_format: dict | None = None,
+) -> dict:
     """Call LLM and parse JSON response. Returns empty dict on failure."""
     user_message = _render_poi_user(poi, city_name)
     try:
-        raw, _in_tok, _out_tok = await backend.complete(system_prompt, user_message)
+        raw, _in_tok, _out_tok = await backend.complete(
+            system_prompt, user_message, response_format=response_format
+        )
         return json.loads(_extract_json(raw))
     except Exception as e:
         logger.warning("Tourism LLM call failed for %s: %s", poi.name, e)
@@ -130,7 +163,8 @@ async def validate_poi_tourism(
     - final_decision: {is_touristic, visit_type, duration_minutes, source}
     - llm2_result: raw LLM2 output dict (None if not called)
     """
-    llm1 = await _call_llm(backend, _render_llm1_system(), poi, city_name)
+    response_format = _structured_format_if_enabled()
+    llm1 = await _call_llm(backend, _render_llm1_system(), poi, city_name, response_format)
 
     if not llm1:
         return llm1, {
@@ -147,7 +181,7 @@ async def validate_poi_tourism(
     if confidence == "low":
         logger.debug("  LLM1 low confidence for %s → calling LLM2", poi.name)
         await asyncio.sleep(0.3)  # light rate limiting between LLM1 and LLM2
-        llm2 = await _call_llm(backend, _render_llm2_system(), poi, city_name)
+        llm2 = await _call_llm(backend, _render_llm2_system(), poi, city_name, response_format)
         if llm2:
             final, source = _merge_decisions(llm1, llm2)
         else:

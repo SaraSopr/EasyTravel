@@ -1,5 +1,5 @@
 import client from './client'
-import type { User, Experience, Place, Itinerary, PreferenceVector } from '@/types'
+import type { User, Experience, Place, Itinerary, ItinerarySummary, PreferenceVector, PoiSuggestion } from '@/types'
 
 export const login = async (payload: {
   email: string
@@ -94,6 +94,11 @@ export const getPreferences = async (): Promise<PreferenceVector> => {
   return data
 }
 
+export const listItineraries = async (): Promise<ItinerarySummary[]> => {
+  const { data } = await client.get<ItinerarySummary[]>('/itineraries')
+  return data
+}
+
 export const getItinerary = async (id: string): Promise<Itinerary> => {
   const { data } = await client.get<Itinerary>(`/itineraries/${id}`)
   return data
@@ -113,4 +118,26 @@ export const markVisited = async (
 
 export const unmarkVisited = async (itineraryId: string, itemId: string): Promise<void> => {
   await client.delete(`/itineraries/${itineraryId}/items/${itemId}/visited`)
+}
+
+export const getStopAlternatives = async (
+  itineraryId: string,
+  itemId: string,
+): Promise<PoiSuggestion[]> => {
+  const { data } = await client.get<PoiSuggestion[]>(
+    `/itineraries/${itineraryId}/items/${itemId}/alternatives`,
+  )
+  return data
+}
+
+export const replaceStop = async (
+  itineraryId: string,
+  itemId: string,
+  poiId: string,
+): Promise<void> => {
+  await client.put(`/itineraries/${itineraryId}/items/${itemId}`, { poi_id: poiId })
+}
+
+export const removeStop = async (itineraryId: string, itemId: string): Promise<void> => {
+  await client.delete(`/itineraries/${itineraryId}/items/${itemId}`)
 }

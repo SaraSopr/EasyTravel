@@ -16,9 +16,12 @@ client.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('auth_user')
-      window.location.href = '/login'
+      const isDevMode = localStorage.getItem('auth_token') === 'dev'
+      if (!isDevMode) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_user')
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   },

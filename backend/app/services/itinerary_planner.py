@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from app.config import settings
+
 if TYPE_CHECKING:
     from app.models.poi import Poi
     from app.models.preference import UserPreference
@@ -359,6 +361,45 @@ def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * R * math.asin(math.sqrt(a))
 
 
+def resolve_activity_radius_m(
+    activity_pois: list[Poi],
+    city_lat: float,
+    city_lng: float,
+    num_days: int,
+) -> float:
+    """Resolve the city-centre activity radius used before solving.
+
+    ``fixed`` mode keeps the thesis A/B switch simple. ``adaptive`` mode treats
+    ``activity_radius_km`` as the compact-city floor, then expands to cover a
+    configurable share/count of the candidate POI distribution, capped by the
+    hard city radius to avoid day-trip outliers.
+    """
+    min_radius_m = max(0.0, min(settings.activity_radius_km, MAX_CITY_RADIUS_KM)) * 1000
+    max_radius_m = MAX_CITY_RADIUS_KM * 1000
+    mode = (settings.activity_radius_mode or "adaptive").strip().lower()
+
+    if mode == "fixed":
+        return min_radius_m
+    if mode != "adaptive":
+        logger.warning("Unknown activity_radius_mode=%r; falling back to adaptive", mode)
+
+    distances = sorted(
+        haversine_m(p.lat, p.lng, city_lat, city_lng)
+        for p in activity_pois
+        if p.lat is not None and p.lng is not None
+    )
+    distances = [d for d in distances if d <= max_radius_m]
+    if not distances:
+        return min_radius_m
+
+    target_share = max(0.0, min(1.0, settings.activity_radius_target_share))
+    min_count = max(num_days * 2, num_days * max(1, settings.activity_radius_min_pois_per_day))
+    share_count = math.ceil(len(distances) * target_share)
+    target_count = min(len(distances), max(min_count, share_count))
+    adaptive_radius_m = distances[target_count - 1]
+    return max(min_radius_m, min(adaptive_radius_m, max_radius_m))
+
+
 def select_transport(distance_m: float) -> tuple[str, float]:
     if distance_m < 800:
         mode = "walking"
@@ -368,6 +409,65 @@ def select_transport(distance_m: float) -> tuple[str, float]:
         mode = "taxi"
     travel_minutes = (distance_m / SPEED_MS[mode]) / 60
     return mode, travel_minutes
+
+
+# scheduler mode → DB / Routes mode (taxi maps to road "driving")
+_SCHED_TO_DB_MODE: dict[str, str] = {"walking": "walking", "transit": "transit", "taxi": "driving"}
+
+# Type alias for the in-memory travel lookup resolved from the cache before scheduling.
+# Key: (origin_poi_id, dest_poi_id, db_mode) → (minutes, meters)
+TravelLookup = dict
+
+
+def _travel(
+    origin_id,
+    origin_lat: float,
+    origin_lng: float,
+    dest_id,
+    dest_lat: float,
+    dest_lng: float,
+    travel_lookup: TravelLookup | None,
+) -> tuple[str, float]:
+    """Return (transport_mode, minutes) for one leg.
+
+    The transport MODE is always chosen from the haversine distance (the existing
+    heuristic). The MINUTES come from the real travel-time cache when a hit exists,
+    otherwise from the haversine estimate. The fallback is never blocking.
+    """
+    dist = haversine_m(origin_lat, origin_lng, dest_lat, dest_lng)
+    mode, hav_min = select_transport(dist)
+    if travel_lookup and origin_id is not None and dest_id is not None:
+        hit = travel_lookup.get((origin_id, dest_id, _SCHED_TO_DB_MODE[mode]))
+        if hit is not None:
+            return mode, hit[0]
+    return mode, hav_min
+
+
+async def prefetch_travel_matrix(session, pois: list[Poi]) -> TravelLookup:
+    """Pre-populate the travel-time cache for all directed pairs among ``pois``.
+
+    Returns a lookup keyed by (origin_id, dest_id, db_mode) → (minutes, meters).
+    The mode per pair is decided by select_transport() on the haversine distance,
+    matching how _travel() looks the leg up during scheduling. Only the mode each
+    pair actually needs is requested (halving the matrix elements). Failures fall
+    back to haversine inside routes_client — this call never raises on routing.
+    """
+    from collections import defaultdict
+
+    from app.services import routes_client
+
+    by_mode: dict[str, list[tuple[Poi, Poi]]] = defaultdict(list)
+    for a in pois:
+        for b in pois:
+            if a.id == b.id:
+                continue
+            mode, _ = select_transport(haversine_m(a.lat, a.lng, b.lat, b.lng))
+            by_mode[_SCHED_TO_DB_MODE[mode]].append((a, b))
+
+    lookup: TravelLookup = {}
+    for db_mode, pairs in by_mode.items():
+        lookup.update(await routes_client.get_travel_times_batch(session, pairs, db_mode))
+    return lookup
 
 
 def _is_open(poi: Poi, dt: datetime) -> bool:
@@ -403,6 +503,27 @@ def _poi_vec(poi: Poi) -> np.ndarray:
 
 def _user_vec(prefs: UserPreference) -> np.ndarray:
     return np.array([getattr(prefs, k) or 0.0 for k in _FEATURE_KEYS], dtype=float)
+
+
+def food_price_level_limit(food_preference: float | None) -> int | None:
+    """Map the user's food interest to the highest Google price level allowed.
+
+    Low food interest means meals should be practical stops, not premium dining
+    experiences. ``None`` means no price cap.
+    """
+    food = 0.0 if food_preference is None else max(0.0, min(1.0, food_preference))
+    if food < 0.35:
+        return 2
+    if food < 0.70:
+        return 3
+    return None
+
+
+def is_food_price_acceptable(poi: Poi, max_price_level: int | None) -> bool:
+    if max_price_level is None:
+        return True
+    price_level = getattr(poi, "price_level", None)
+    return price_level is None or price_level <= max_price_level
 
 
 # Feature key order: nature, culture, food, adventure, nightlife, relax, family_friendly
@@ -474,6 +595,121 @@ def _solve_tsp(pois: list[Poi], depot_lat: float, depot_lng: float) -> list[Poi]
 # Clustering helpers (unchanged)
 # ---------------------------------------------------------------------------
 
+def _cluster_pois_leiden(
+    activity_pois: list[Poi],
+    num_days: int,
+    k_neighbors: int = 10,
+) -> dict[int, list[Poi]]:
+    """
+    Leiden-based geographic clustering on a k-NN graph.
+    See docs/leiden-clustering-spec.md for the full algorithm description.
+
+    Steps:
+      1. Build a weighted k-NN graph (edges = Haversine distance, weight = exp(-d/sigma))
+      2. Run Leiden (ModularityVertexPartition) to find natural geographic communities
+      3. Merge the closest community pairs until exactly num_days groups remain
+    """
+    import math
+    import igraph as ig
+    import leidenalg
+
+    n = len(activity_pois)
+    k = min(k_neighbors, n - 1)
+
+    # --- Step 1: weighted k-NN graph ---
+    dists: list[list[float]] = [
+        [
+            haversine_m(
+                activity_pois[i].lat, activity_pois[i].lng,
+                activity_pois[j].lat, activity_pois[j].lng,
+            )
+            for j in range(n)
+        ]
+        for i in range(n)
+    ]
+
+    # k nearest neighbors for each node (excluding self)
+    knn_lists: list[list[int]] = []
+    nn_dists: list[float] = []
+    for i in range(n):
+        order = sorted(range(n), key=lambda j, _i=i: dists[_i][j])
+        neighbors = order[1: k + 1]
+        knn_lists.append(neighbors)
+        nn_dists.extend(dists[i][j] for j in neighbors)
+
+    # Adaptive scale sigma = median of all k-NN distances
+    sigma = max(float(np.median(nn_dists)) if nn_dists else 1000.0, 1.0)
+
+    edge_set: set[tuple[int, int]] = set()
+    edge_list: list[tuple[int, int]] = []
+    weight_list: list[float] = []
+    for i, neighbors in enumerate(knn_lists):
+        for j in neighbors:
+            pair = (min(i, j), max(i, j))
+            if pair not in edge_set:
+                edge_set.add(pair)
+                edge_list.append(pair)
+                weight_list.append(math.exp(-dists[i][j] / sigma))
+
+    # --- Step 2: Leiden community detection ---
+    g = ig.Graph(n=n, edges=edge_list)
+    g.es["weight"] = weight_list
+
+    partition = leidenalg.find_partition(
+        g,
+        leidenalg.ModularityVertexPartition,
+        weights="weight",
+        seed=42,
+    )
+
+    communities: dict[int, list[Poi]] = {
+        cid: [activity_pois[i] for i in members]
+        for cid, members in enumerate(partition)
+        if members
+    }
+
+    logger.info(
+        "Leiden: %d POIs → %d natural communities (target %d days)",
+        n, len(communities), num_days,
+    )
+
+    if len(communities) < num_days:
+        raise ValueError(
+            f"Leiden found only {len(communities)} communities for {num_days} days"
+        )
+
+    # --- Step 3: size-aware hierarchical merge down to num_days ---
+    # Score = geographic_distance * size_imbalance_penalty
+    # where penalty = merged_size / mean_target_size, capped at 3.
+    # This prevents one cluster from absorbing too many communities.
+    target_size = len(activity_pois) / num_days
+
+    while len(communities) > num_days:
+        comm_ids = list(communities.keys())
+        centroids: dict[int, tuple[float, float]] = {
+            cid: _cluster_center(communities[cid]) for cid in comm_ids
+        }
+
+        best_pair: tuple[int, int] = (comm_ids[0], comm_ids[1])
+        best_score = float("inf")
+        for ii in range(len(comm_ids)):
+            for jj in range(ii + 1, len(comm_ids)):
+                ci, cj = comm_ids[ii], comm_ids[jj]
+                geo_dist = haversine_m(*centroids[ci], *centroids[cj])
+                merged_size = len(communities[ci]) + len(communities[cj])
+                imbalance = 1.0 + 2.0 * ((merged_size - target_size) ** 2) / (target_size ** 2)
+                score = geo_dist * imbalance
+                if score < best_score:
+                    best_score = score
+                    best_pair = (ci, cj)
+
+        ci, cj = best_pair
+        communities[ci] = communities[ci] + communities[cj]
+        del communities[cj]
+
+    return {new_id: pois for new_id, (_, pois) in enumerate(communities.items())}
+
+
 def _cluster_pois(
     activity_pois: list[Poi],
     num_days: int,
@@ -482,15 +718,25 @@ def _cluster_pois(
 ) -> dict[int, list[Poi]]:
     """
     Assign activity POIs to day-clusters based on geographic proximity.
+    Tries Leiden clustering first; falls back to KMeans if unavailable or failed.
 
     Special cases:
-    - num_days == 1: skip KMeans, return all POIs in a single cluster
+    - num_days == 1: skip clustering, return all POIs in a single cluster
     - len(activity_pois) < num_days * 2: too few for meaningful clusters,
       return a single cluster with all POIs
     """
     if num_days == 1 or len(activity_pois) < num_days * 2:
         return {0: list(activity_pois)}
 
+    # Try Leiden clustering (see docs/leiden-clustering-spec.md)
+    try:
+        return _cluster_pois_leiden(activity_pois, num_days)
+    except ImportError:
+        logger.info("leidenalg/igraph not installed — falling back to KMeans")
+    except Exception as exc:
+        logger.warning("Leiden clustering failed (%s) — falling back to KMeans", exc)
+
+    # KMeans fallback
     from sklearn.cluster import KMeans
 
     coords = np.array([[p.lat, p.lng] for p in activity_pois])
@@ -522,14 +768,13 @@ def _cluster_pois(
 
     result = {k: v for k, v in clusters.items() if v}
 
-    # If KMeans produced fewer clusters than num_days (e.g. empty cluster due to
-    # bimodal geographic distribution), split the largest cluster until we have enough.
+    # If KMeans produced fewer clusters than num_days, split the largest
     next_id = max(result.keys()) + 1
     while len(result) < num_days:
         largest_id = max(result, key=lambda k: len(result[k]))
         largest_pois = result[largest_id]
         if len(largest_pois) < 4:
-            break  # too few to split meaningfully
+            break
         coords = np.array([[p.lat, p.lng] for p in largest_pois])
         sub = KMeans(n_clusters=2, random_state=42, n_init=10).fit_predict(coords)
         half_a = [p for p, lbl in zip(largest_pois, sub) if lbl == 0]
@@ -805,6 +1050,8 @@ def _schedule_day(
     depot_lat: float,
     depot_lng: float,
     popularity_scores: dict | None = None,
+    travel_lookup: TravelLookup | None = None,
+    max_food_price_level: int | None = None,
 ) -> tuple[list[_Stop], list[tuple[Poi, float]]]:
     """
     Build the schedule for one day.
@@ -823,6 +1070,7 @@ def _schedule_day(
 
     current = start_dt
     current_lat, current_lng = depot_lat, depot_lng
+    current_id = None  # POI id of current position (None at the depot)
 
     selected_activities: list[tuple[Poi, float]] = []
     deferred_activities: list[tuple[Poi, float]] = []
@@ -856,6 +1104,8 @@ def _schedule_day(
                 continue
             if meal_only and not is_meal_poi(fp):
                 continue
+            if not is_food_price_acceptable(fp, max_food_price_level):
+                continue
             d = haversine_m(_lat, _lng, fp.lat, fp.lng)
             pop = _pop.get(fp.id, 0.5)
             if d < best_dist or (abs(d - best_dist) < 200 and pop > best_pop):
@@ -883,6 +1133,7 @@ def _schedule_day(
                     dur = get_food_duration(fp)
                     current = current + timedelta(minutes=dur)
                     current_lat, current_lng = fp.lat, fp.lng
+                    current_id = fp.id
                     lunch_done = True
                     logger.info(
                         "Lunch selected: %s (type: %s, meal_poi: %s)",
@@ -907,6 +1158,7 @@ def _schedule_day(
                     dur = get_food_duration(fp)
                     current = current + timedelta(minutes=dur)
                     current_lat, current_lng = fp.lat, fp.lng
+                    current_id = fp.id
                     dinner_done = True
                     logger.info(
                         "Dinner selected: %s (type: %s, meal_poi: %s)",
@@ -918,8 +1170,9 @@ def _schedule_day(
 
         # Travel to this activity
         try:
-            dist = haversine_m(current_lat, current_lng, ap.lat, ap.lng)
-            _, travel_min = select_transport(dist)
+            _, travel_min = _travel(
+                current_id, current_lat, current_lng, ap.id, ap.lat, ap.lng, travel_lookup
+            )
             arrival = current + timedelta(minutes=travel_min)
 
             if not _is_open(ap, arrival):
@@ -947,6 +1200,7 @@ def _schedule_day(
             selected_activities.append((ap, sim_score))
             current = departure
             current_lat, current_lng = ap.lat, ap.lng
+            current_id = ap.id
         except Exception as exc:
             logger.warning("Skipping POI %s during scheduling: %s", getattr(ap, "name", "?"), exc)
 
@@ -989,19 +1243,21 @@ def _schedule_day(
 
     cur = start_dt
     cur_lat, cur_lng = depot_lat, depot_lng
+    cur_id = None  # POI id of current position (None at the depot)
 
     lunch_inserted = False
     dinner_inserted = False
 
-    def _add_food_stop(food_poi: Poi) -> None:
-        nonlocal cur, cur_lat, cur_lng
+    def _add_food_stop(food_poi: Poi, forced_arrival: datetime | None = None) -> None:
+        nonlocal cur, cur_lat, cur_lng, cur_id
         if not final_stops:
             travel_min = 0.0
             transport = None
         else:
-            dist = haversine_m(cur_lat, cur_lng, food_poi.lat, food_poi.lng)
-            transport, travel_min = select_transport(dist)
-        arrival = cur + timedelta(minutes=travel_min)
+            transport, travel_min = _travel(
+                cur_id, cur_lat, cur_lng, food_poi.id, food_poi.lat, food_poi.lng, travel_lookup
+            )
+        arrival = forced_arrival if forced_arrival is not None else cur + timedelta(minutes=travel_min)
         vm, vd, vn = resolve_visit_mode(food_poi, 1.0)
         departure = arrival + timedelta(minutes=vd)
         final_stops.append(_Stop(
@@ -1017,15 +1273,17 @@ def _schedule_day(
         ))
         cur = departure
         cur_lat, cur_lng = food_poi.lat, food_poi.lng
+        cur_id = food_poi.id
 
     def _add_activity_stop(poi: Poi, sim_score: float) -> bool:
-        nonlocal cur, cur_lat, cur_lng
+        nonlocal cur, cur_lat, cur_lng, cur_id
         if not final_stops:
             travel_min = 0.0
             transport = None
         else:
-            dist = haversine_m(cur_lat, cur_lng, poi.lat, poi.lng)
-            transport, travel_min = select_transport(dist)
+            transport, travel_min = _travel(
+                cur_id, cur_lat, cur_lng, poi.id, poi.lat, poi.lng, travel_lookup
+            )
         arrival = cur + timedelta(minutes=travel_min)
         vm, vd, vn = resolve_visit_mode(poi, sim_score)
         departure = arrival + timedelta(minutes=vd)
@@ -1057,6 +1315,7 @@ def _schedule_day(
         type_counts[primary] = type_counts.get(primary, 0) + 1
         cur = departure
         cur_lat, cur_lng = poi.lat, poi.lng
+        cur_id = poi.id
         return True
 
     lunch_target = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
@@ -1084,8 +1343,9 @@ def _schedule_day(
     has_activities = any(s.poi.travel_category != "food" and not is_actual_food_poi(s.poi) for s in final_stops)
 
     if has_activities and lunch_poi and not lunch_inserted:
-        dist = haversine_m(cur_lat, cur_lng, lunch_poi.lat, lunch_poi.lng)
-        _, travel_min = select_transport(dist)
+        _, travel_min = _travel(
+            cur_id, cur_lat, cur_lng, lunch_poi.id, lunch_poi.lat, lunch_poi.lng, travel_lookup
+        )
         arrival = cur + timedelta(minutes=travel_min)
         if arrival + timedelta(minutes=get_food_duration(lunch_poi)) <= end_dt:
             _add_food_stop(lunch_poi)
@@ -1094,22 +1354,37 @@ def _schedule_day(
             logger.warning("Lunch not inserted for day %s — no time slot available", day_date.date())
 
     if has_activities and dinner_poi and not dinner_inserted:
-        dist = haversine_m(cur_lat, cur_lng, dinner_poi.lat, dinner_poi.lng)
-        _, travel_min = select_transport(dist)
+        _, travel_min = _travel(
+            cur_id, cur_lat, cur_lng, dinner_poi.id, dinner_poi.lat, dinner_poi.lng, travel_lookup
+        )
         arrival = cur + timedelta(minutes=travel_min)
         dinner_min_dt = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
         if arrival < dinner_min_dt:
-            logger.warning(
-                "Dinner not inserted for day %s — arrival %s is before minimum dinner hour %02d:00",
-                day_date.date(), arrival.strftime("%H:%M"), DINNER_MIN_H,
-            )
+            # Safety net: force dinner at DINNER_MIN_H if it fits before end_dt
+            forced = dinner_min_dt
+            if forced + timedelta(minutes=get_food_duration(dinner_poi)) <= end_dt:
+                _add_food_stop(dinner_poi, forced_arrival=forced)
+                dinner_inserted = True
+                logger.info(
+                    "Dinner force-inserted at %s for day %s",
+                    forced.strftime("%H:%M"), day_date.date(),
+                )
+            else:
+                logger.warning("Dinner not inserted for day %s — no time slot available", day_date.date())
         elif arrival + timedelta(minutes=get_food_duration(dinner_poi)) <= end_dt:
             _add_food_stop(dinner_poi)
             dinner_inserted = True
         else:
             logger.warning("Dinner not inserted for day %s — no time slot available", day_date.date())
 
-    return final_stops, deferred_activities
+    # Collect food that was pre-selected but never inserted (reserved to avoid reuse next day)
+    reserved_food_ids: set = set()
+    if lunch_poi and not lunch_inserted:
+        reserved_food_ids.add(lunch_poi.id)
+    if dinner_poi and not dinner_inserted:
+        reserved_food_ids.add(dinner_poi.id)
+
+    return final_stops, deferred_activities, reserved_food_ids
 
 
 # ---------------------------------------------------------------------------
@@ -1180,9 +1455,22 @@ async def generate(
     travel_with_children: bool = False,
     age_range: str | None = None,
     travel_mode: str = "solo",
+    session=None,  # AsyncSession — when provided + routes_api_enabled, real travel times are used
+    solver: str | None = None,
+    start_lat: float | None = None,
+    start_lng: float | None = None,
+    end_lat: float | None = None,
+    end_lng: float | None = None,
 ) -> tuple[list[list[_Stop]], list[str]]:
     """
-    Plan a multi-day itinerary using two-level geographic clustering + MMR selection.
+    Plan a multi-day itinerary.
+
+    Two solvers are available (see docs/toptw-itinerary-solver-spec.md), selected by
+    ``solver`` (falling back to ``settings.itinerary_solver``):
+    - "greedy" (baseline): two-level geographic clustering + MMR + greedy scheduling.
+    - "toptw": a single OR-Tools optimisation over all days (Team Orienteering Problem
+      with Time Windows). Both receive the same filtered candidates and real travel
+      times for a fair comparison.
 
     Returns (all_days, warnings):
     - all_days: list of days, each day is a list of _Stop objects
@@ -1194,6 +1482,7 @@ async def generate(
     warnings: list[str] = []
     confirmed_visited_ids = confirmed_visited_ids or set()
     previously_suggested_ids = previously_suggested_ids or set()
+    max_food_price_level = food_price_level_limit(getattr(user_prefs, "food", None))
     uvec = _user_vec(user_prefs)
     uvec = _apply_mode_bias(uvec, travel_mode)
     proximity_km = _proximity_km_for_profile(travel_with_children, age_range)
@@ -1207,14 +1496,24 @@ async def generate(
     activity_pois = [p for p in activity_pois if is_touristic(p)]
     food_pois = [p for p in food_pois if is_touristic(p)]
 
-    # Exclude activity POIs that are too far from the city centre (e.g. Aranjuez for Madrid).
-    # Food POIs are not filtered — a restaurant 25 km away is harmless because food selection
-    # is proximity-weighted and such a venue would never win against closer options.
-    max_radius_m = MAX_CITY_RADIUS_KM * 1000
+    # Exclude activity POIs too far from the city centre. In fixed mode this is
+    # the A/B radius; in adaptive mode the same 8 km default becomes the minimum
+    # for compact cities, expanding for sparse/extended POI distributions. Food
+    # POIs are not filtered — selection is proximity-weighted, so far venues do
+    # not win against closer ones.
+    max_radius_m = resolve_activity_radius_m(activity_pois, city_lat, city_lng, num_days)
+    before_radius_count = len(activity_pois)
     activity_pois = [
         p for p in activity_pois
         if haversine_m(p.lat, p.lng, city_lat, city_lng) <= max_radius_m
     ]
+    logger.info(
+        "Activity radius filter: mode=%s radius=%.1f km kept=%d/%d",
+        settings.activity_radius_mode,
+        max_radius_m / 1000,
+        len(activity_pois),
+        before_radius_count,
+    )
 
     # For family travel: exclude nightlife POIs (bars, clubs, casinos) from activities
     if travel_mode == "family":
@@ -1254,6 +1553,39 @@ async def generate(
 
     # Sort food by cosine similarity (global pool, shared across days)
     food_pois.sort(key=lambda p: _cosine_sim(uvec, _poi_vec(p)), reverse=True)
+
+    # --- Dispatch: TOPTW optimiser vs greedy baseline ---
+    chosen_solver = (solver or settings.itinerary_solver or "greedy").lower()
+    if chosen_solver == "toptw":
+        from app.services import toptw_solver
+
+        logger.info("Dispatching to TOPTW solver (num_days=%d)", num_days)
+        toptw_days, toptw_warnings = await toptw_solver.plan(
+            activity_pois=activity_pois,
+            food_pois=food_pois,
+            uvec=uvec,
+            popularity_scores=popularity_scores,
+            num_days=num_days,
+            start_time_str=start_time_str,
+            end_time_str=end_time_str,
+            city_lat=city_lat,
+            city_lng=city_lng,
+            confirmed_visited_ids=confirmed_visited_ids,
+            previously_suggested_ids=previously_suggested_ids,
+            max_food_price_level=max_food_price_level,
+            start_lat=start_lat,
+            start_lng=start_lng,
+            end_lat=end_lat,
+            end_lng=end_lng,
+            session=session,
+        )
+        warnings.extend(toptw_warnings)
+        elapsed_ms = int((_time_mod.monotonic() - t0) * 1000)
+        logger.info(
+            "TOPTW itinerary generated: num_days=%d total_scheduled=%d elapsed_ms=%d",
+            num_days, sum(len(d) for d in toptw_days), elapsed_ms,
+        )
+        return toptw_days, warnings
 
     sh, sm = map(int, start_time_str.split(":"))
     eh, em = map(int, end_time_str.split(":"))
@@ -1306,20 +1638,25 @@ async def generate(
             (p, _cosine_sim(_poi_vec(p), uvec)) for p in clusters[cluster_id]
         ]
 
-        # Prepend deferred (already scored) from previous day
-        all_candidates: list[tuple[Poi, float]] = global_deferred + cluster_scored
+        # Cluster center computed from this day's own POIs (before adding deferred)
+        cluster_pois_only = [p for p, _ in cluster_scored]
+        center_lat, center_lng = (
+            _cluster_center(cluster_pois_only) if len(cluster_pois_only) > 1
+            else (city_lat, city_lng)
+        )
+
+        # Prepend deferred from previous day, filtered by distance to this cluster
+        _MAX_DEFERRED_M = 4000
+        filtered_deferred = [
+            (p, score) for p, score in global_deferred
+            if haversine_m(p.lat, p.lng, center_lat, center_lng) <= _MAX_DEFERRED_M
+        ]
+        all_candidates: list[tuple[Poi, float]] = filtered_deferred + cluster_scored
         global_deferred = []
 
         if not all_candidates:
             warnings.append(f"Day {day_idx + 1} has no available POIs and was skipped.")
             continue
-
-        # Cluster center for proximity scoring (use plain Poi list)
-        candidate_pois = [p for p, _ in all_candidates]
-        center_lat, center_lng = (
-            _cluster_center(candidate_pois) if len(candidate_pois) > 1
-            else (city_lat, city_lng)
-        )
 
         logger.info(
             "  Cluster %d: %d POIs, center=(%.4f, %.4f)",
@@ -1327,13 +1664,19 @@ async def generate(
         )
 
         # --- Level 2: MMR selection (diversity + relevance) ---
+        # Dynamic buffer: 3× the estimated stops needed to fill the day,
+        # so opening-hour closures don't leave the day empty.
+        day_minutes = (eh * 60 + em) - (sh * 60 + sm)
+        estimated_stops = max(1, day_minutes // 75)
+        mmr_k = min(len(all_candidates), max(25, estimated_stops * 3))
+
         candidate_pois_only = [p for p, _ in all_candidates]
         candidates = _mmr_select(
             candidates=candidate_pois_only,
             uvec=uvec,
             center_lat=center_lat,
             center_lng=center_lng,
-            k=15,  # buffer: some may be closed or not fit in time
+            k=mmr_k,
             confirmed_visited_ids=confirmed_visited_ids,
             previously_suggested_ids=previously_suggested_ids,
             popularity_scores=popularity_scores,
@@ -1349,8 +1692,21 @@ async def generate(
 
         available_food = [p for p in food_pois if p.id not in used_food_ids]
 
+        # --- Pre-fetch real travel times for this day's activities ---
+        # One batched matrix call (cache-first) before entering the sync scheduler,
+        # so _schedule_day stays synchronous and does no I/O. Falls back to
+        # haversine transparently when routing is disabled or a leg has no route.
+        travel_lookup: TravelLookup = {}
+        if session is not None and settings.routes_api_enabled:
+            try:
+                travel_lookup = await prefetch_travel_matrix(
+                    session, [p for p, _ in candidates]
+                )
+            except Exception as exc:  # routing must never block generation
+                logger.warning("Travel-matrix prefetch failed (%s) — using haversine", exc)
+
         # --- Schedule day ---
-        stops, deferred = await loop.run_in_executor(
+        stops, deferred, reserved = await loop.run_in_executor(
             executor,
             _schedule_day,
             candidates,
@@ -1361,12 +1717,16 @@ async def generate(
             center_lat,
             center_lng,
             popularity_scores,
+            travel_lookup,
+            max_food_price_level,
         )
 
         if deferred:
             had_closed_pois = True
             global_deferred.extend(deferred)
 
+        # Mark food as used: both inserted stops and pre-selected-but-uninserted
+        used_food_ids.update(reserved)
         for s in stops:
             if any(t in FOOD_TYPES for t in (s.poi.types or [])):
                 used_food_ids.add(s.poi.id)

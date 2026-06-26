@@ -1,11 +1,19 @@
 import { useState } from 'react'
-import type { ItineraryDay } from '@/types'
+import { Repeat, Trash2, X } from 'lucide-react'
+import type { ItineraryDay, PoiSuggestion } from '@/types'
 import { getCategoryColor } from '@/utils/categoryColors'
-import { markVisited, unmarkVisited } from '@/api/endpoints'
+import {
+  markVisited,
+  unmarkVisited,
+  getStopAlternatives,
+  replaceStop,
+  removeStop,
+} from '@/api/endpoints'
 
 interface ItineraryTimelineProps {
   day: ItineraryDay
   itineraryId: string
+  onChange?: () => void | Promise<void>
 }
 
 function transportLabel(mode: string | null): string {
@@ -14,9 +22,16 @@ function transportLabel(mode: string | null): string {
   return '🚶'
 }
 
-export default function ItineraryTimeline({ day, itineraryId }: ItineraryTimelineProps) {
+export default function ItineraryTimeline({ day, itineraryId, onChange }: ItineraryTimelineProps) {
   const [visited, setVisited] = useState<Record<string, boolean>>({})
   const [loadingId, setLoadingId] = useState<string | null>(null)
+
+  // Alternatives sheet state
+  const [sheetItemId, setSheetItemId] = useState<string | null>(null)
+  const [sheetStopName, setSheetStopName] = useState<string>('')
+  const [alternatives, setAlternatives] = useState<PoiSuggestion[]>([])
+  const [loadingAlts, setLoadingAlts] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   const toggleVisited = async (itemId: string, currentlyVisited: boolean) => {
     setLoadingId(itemId)
@@ -30,6 +45,46 @@ export default function ItineraryTimeline({ day, itineraryId }: ItineraryTimelin
       }
     } finally {
       setLoadingId(null)
+    }
+  }
+
+  const openAlternatives = async (itemId: string, stopName: string) => {
+    setSheetItemId(itemId)
+    setSheetStopName(stopName)
+    setAlternatives([])
+    setLoadingAlts(true)
+    try {
+      const alts = await getStopAlternatives(itineraryId, itemId)
+      setAlternatives(alts)
+    } finally {
+      setLoadingAlts(false)
+    }
+  }
+
+  const closeSheet = () => {
+    setSheetItemId(null)
+    setAlternatives([])
+  }
+
+  const chooseAlternative = async (poiId: string) => {
+    if (!sheetItemId) return
+    setBusyId(poiId)
+    try {
+      await replaceStop(itineraryId, sheetItemId, poiId)
+      closeSheet()
+      await onChange?.()
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleRemove = async (itemId: string) => {
+    setBusyId(itemId)
+    try {
+      await removeStop(itineraryId, itemId)
+      await onChange?.()
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -123,27 +178,107 @@ export default function ItineraryTimeline({ day, itineraryId }: ItineraryTimelin
                 )}
 
                 {stop.item_id && (
-                  <button
-                    onClick={() => toggleVisited(stop.item_id!, isVisited)}
-                    disabled={loadingId === stop.item_id}
-                    className={`mt-3 w-full text-xs font-semibold py-2 rounded-xl border transition-colors active:scale-[0.98] disabled:opacity-50 ${
-                      isVisited
-                        ? 'bg-white border-gray-200 text-gray-500'
-                        : 'bg-emerald-500 border-emerald-500 text-white'
-                    }`}
-                  >
-                    {loadingId === stop.item_id
-                      ? '…'
-                      : isVisited
-                        ? 'Segna come non visitato'
-                        : '✓ Segna come visitato'}
-                  </button>
+                  <div className="mt-3 flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openAlternatives(stop.item_id!, stop.name)}
+                        disabled={busyId === stop.item_id}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-600 transition-all active:scale-[0.98] disabled:opacity-50"
+                      >
+                        <Repeat size={13} /> Replace
+                      </button>
+                      <button
+                        onClick={() => handleRemove(stop.item_id!)}
+                        disabled={busyId === stop.item_id}
+                        className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-xl border border-gray-200 bg-white text-gray-500 transition-all active:scale-[0.98] disabled:opacity-50"
+                      >
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => toggleVisited(stop.item_id!, isVisited)}
+                      disabled={loadingId === stop.item_id}
+                      className={`w-full text-xs font-semibold py-2 rounded-xl border transition-all active:scale-[0.98] disabled:opacity-50 ${
+                        isVisited
+                          ? 'bg-white border-gray-200 text-gray-500'
+                          : 'bg-emerald-500 border-emerald-500 text-white'
+                      }`}
+                    >
+                      {loadingId === stop.item_id
+                        ? '…'
+                        : isVisited
+                          ? 'Mark as not visited'
+                          : '✓ Mark as visited'}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
           </div>
         )
       })}
+
+      {/* Alternatives bottom sheet */}
+      {sheetItemId && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/40" onClick={closeSheet} />
+          <div className="relative w-full max-w-md bg-white rounded-t-3xl max-h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-gray-100">
+              <div className="min-w-0">
+                <p className="text-xs text-gray-400 font-medium">Replacing</p>
+                <h3 className="text-base font-bold text-gray-900 truncate">{sheetStopName}</h3>
+              </div>
+              <button
+                onClick={closeSheet}
+                className="shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 active:scale-95"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto px-4 py-3 flex flex-col gap-2">
+              {loadingAlts ? (
+                <div className="flex flex-col gap-2 py-2">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="w-full h-16 rounded-2xl shimmer animate-pulse" />
+                  ))}
+                </div>
+              ) : alternatives.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-10">No alternatives available.</p>
+              ) : (
+                alternatives.map((alt) => (
+                  <button
+                    key={alt.poi_id}
+                    onClick={() => chooseAlternative(alt.poi_id)}
+                    disabled={busyId !== null}
+                    className="text-left bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm active:scale-[0.99] transition-transform disabled:opacity-50"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-bold text-sm text-gray-900 leading-tight flex-1 min-w-0">{alt.name}</p>
+                      {alt.travel_category && (
+                        <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${getCategoryColor(alt.travel_category)}`}>
+                          {alt.travel_category}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      {alt.rating != null && (
+                        <span className="text-xs text-gray-500">⭐ {alt.rating.toFixed(1)}</span>
+                      )}
+                      {alt.address && (
+                        <span className="text-xs text-gray-400 truncate">📍 {alt.address}</span>
+                      )}
+                    </div>
+                    {busyId === alt.poi_id && (
+                      <p className="text-xs text-indigo-500 mt-1">Sostituzione in corso…</p>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

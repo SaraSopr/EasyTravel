@@ -55,59 +55,58 @@ export default function ExperienceDetailSheet({
             open ? 'scale-100' : 'scale-90'
           }`}
         >
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 z-10"
-        >
-          <X size={16} />
-        </button>
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 z-10"
+          >
+            <X size={16} />
+          </button>
 
-        {experience && (
-          <div className="px-6 pt-6 pb-6">
-            <div className="w-full h-44 rounded-2xl overflow-hidden mb-5">
-              {experience.photo_url ? (
-                <img
-                  src={experience.photo_url}
-                  alt={experience.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full bg-gradient-to-br from-indigo-100 to-violet-100 flex items-center justify-center">
-                  <IconComponent size={56} className="text-indigo-400" />
-                </div>
-              )}
+          {experience && (
+            <div className="px-6 pt-6 pb-6">
+              <div className="w-full h-44 rounded-2xl overflow-hidden mb-5">
+                {experience.photo_url ? (
+                  <img
+                    src={experience.photo_url}
+                    alt={experience.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-indigo-100 to-violet-100 flex items-center justify-center">
+                    <IconComponent size={56} className="text-indigo-400" />
+                  </div>
+                )}
+              </div>
+
+              <h2 className="text-xl font-bold text-gray-900 mb-2">
+                {experience.name}
+              </h2>
+              <p className="text-gray-500 text-sm leading-relaxed">
+                {experience.description}
+              </p>
+
+              <button
+                onClick={() => { onToggle(); onClose() }}
+                className={`mt-6 flex items-center justify-center gap-2 w-full font-semibold rounded-xl py-3.5 transition-all active:scale-[0.98] ${
+                  selected
+                    ? 'bg-indigo-50 border-2 border-indigo-400 text-indigo-600'
+                    : 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md shadow-indigo-200'
+                }`}
+              >
+                {selected ? (
+                  <>
+                    <CheckCircle2 size={18} />
+                    Selected
+                  </>
+                ) : (
+                  <>
+                    <Circle size={18} />
+                    Select this experience
+                  </>
+                )}
+              </button>
             </div>
-
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              {experience.name}
-            </h2>
-            <p className="text-gray-500 text-sm leading-relaxed">
-              {experience.description}
-            </p>
-
-            <button
-              onClick={() => { onToggle(); onClose() }}
-              className={`mt-6 flex items-center justify-center gap-2 w-full font-semibold rounded-xl py-3.5 transition-all active:scale-[0.98] ${
-                selected
-                  ? 'bg-indigo-50 border-2 border-indigo-400 text-indigo-600'
-                  : 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md shadow-indigo-200'
-              }`}
-            >
-              {selected ? (
-                <>
-                  <CheckCircle2 size={18} />
-                  Selected
-                </>
-              ) : (
-                <>
-                  <Circle size={18} />
-                  Select
-                </>
-              )}
-            </button>
-          </div>
-        )}
+          )}
         </div>
       </div>
     </>
