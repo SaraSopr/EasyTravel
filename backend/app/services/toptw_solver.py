@@ -46,6 +46,7 @@ from app.services.itinerary_planner import (
     haversine_m,
     is_food_price_acceptable,
     is_meal_poi,
+    pick_best_food,
     prefetch_travel_matrix,
     resolve_visit_mode,
     select_transport,
@@ -363,14 +364,12 @@ def _nearest_open_food(
     meal_only: bool,
     max_price_level: int | None = None,
 ) -> "Poi | None":
-    """Nearest open (optionally meal-grade) food POI to (lat, lng) at time ``t``.
+    """Best open (optionally meal-grade) food POI near (lat, lng) at time ``t``.
 
-    Mirrors the baseline ``_pick_nearest_open_food``: closest wins, ties within
-    200 m broken by popularity.
+    Mirrors the baseline ``_pick_nearest_open_food``: quality-aware scoring within a
+    walkable radius (proximity + rating − takeaway penalty), nearest as fallback.
     """
-    best: "Poi | None" = None
-    best_dist = float("inf")
-    best_pop = -1.0
+    eligible: list[tuple["Poi", float]] = []
     for fp in food_pois:
         if fp.id in used_ids:
             continue
@@ -380,13 +379,8 @@ def _nearest_open_food(
             continue
         if not is_food_price_acceptable(fp, max_price_level):
             continue
-        d = haversine_m(lat, lng, fp.lat, fp.lng)
-        pop = (popularity_scores or {}).get(fp.id, 0.5)
-        if d < best_dist or (abs(d - best_dist) < 200 and pop > best_pop):
-            best_dist = d
-            best_pop = pop
-            best = fp
-    return best
+        eligible.append((fp, haversine_m(lat, lng, fp.lat, fp.lng)))
+    return pick_best_food(eligible, popularity_scores)
 
 
 def schedule_day_route(
@@ -583,30 +577,43 @@ async def plan(
     if not candidates:
         return [], ["No activity candidates available for this city."]
 
-    # --- Optional geographic pre-clustering: pin each POI to one day's cluster ---
-    # Keeps every day spatially compact (no cross-city outliers), at the cost of the
-    # solver's freedom to rebalance prize across days. Controlled by config so the
-    # thesis can A/B "global TOPTW" vs "clustered TOPTW".
+    # --- Geographic pre-clustering: pin each POI to one day's cluster ---
+    # Keeps every day spatially compact, at the cost of the solver's freedom to
+    # rebalance prize across days. With far outliers already removed by the activity-
+    # radius filter, candidates cluster into balanced day-regions and pinning helps
+    # (it fixes Roma's badly-balanced global solution and slightly improves Madrid).
+    # The only failure mode is a degenerate split (one dominant cluster + a sparse
+    # tail); "auto" detects that via the cluster balance and falls back to global
+    # TOPTW. "on"/"off" force the choice (thesis A/B).
     day_assignment: dict | None = None
-    if settings.toptw_pre_cluster and num_days > 1:
+    mode = (settings.toptw_pre_cluster_mode or "auto").strip().lower()
+    if mode != "off" and num_days > 1:
         from app.services.itinerary_planner import _cluster_pois
 
         clusters = _cluster_pois([c[0] for c in candidates], num_days, city_lat, city_lng)
-        # Map clusters → day indices deterministically (west→east by centroid lng),
+        # Order clusters → day indices deterministically (west→east by centroid lng),
         # capping at num_days so an over-split never produces an out-of-range day.
         ordered_clusters = sorted(
             (pois for pois in clusters.values() if pois),
             key=lambda ps: sum(p.lng for p in ps) / len(ps),
-        )
-        day_assignment = {}
-        for day_idx, pois in enumerate(ordered_clusters[:num_days]):
-            for p in pois:
-                day_assignment[p.id] = day_idx
-        logger.info(
-            "TOPTW pre-cluster: %d candidates → %d day-clusters (sizes=%s)",
-            len(day_assignment), min(len(ordered_clusters), num_days),
-            [len(c) for c in ordered_clusters[:num_days]],
-        )
+        )[:num_days]
+        sizes = [len(c) for c in ordered_clusters]
+        # Balance = smallest cluster ÷ even share. 1.0 = perfectly balanced;
+        # a degenerate core+periphery split → near 0.
+        total = sum(sizes)
+        even_share = total / num_days if num_days else 0
+        balance = (min(sizes) / even_share) if (sizes and even_share) else 0.0
+
+        if mode == "on" or (mode == "auto" and balance >= settings.toptw_cluster_balance_min):
+            day_assignment = {p.id: day_idx for day_idx, pois in enumerate(ordered_clusters) for p in pois}
+            logger.info(
+                "TOPTW pre-cluster ON (mode=%s balance=%.2f sizes=%s)", mode, balance, sizes
+            )
+        else:
+            logger.info(
+                "TOPTW pre-cluster OFF (mode=%s balance=%.2f < %.2f sizes=%s) → global TOPTW",
+                mode, balance, settings.toptw_cluster_balance_min, sizes,
+            )
 
     # Depots default to the city center.
     s_lat = start_lat if start_lat is not None else city_lat

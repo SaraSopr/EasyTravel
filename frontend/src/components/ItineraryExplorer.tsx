@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import { MapContainer, TileLayer, Marker, Polyline, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -42,7 +43,6 @@ function createPinIcon(color: string, colorLight: string, label: string, active:
     className: '',
     html: `<div style="position:relative;width:${w}px;height:${h}px;filter:drop-shadow(0 3px 6px rgba(0,0,0,${active ? 0.35 : 0.22}));transition:all .2s ease">
       <svg viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-        ${active ? `<path d="M16 0C7.163 0 0 7.163 0 16C0 27 16 40 16 40C16 40 32 27 32 16C32 7.163 24.837 0 16 0Z" fill="#fff" transform="translate(0,0) scale(1.12)" transform-origin="16 20"/>` : ''}
         <path d="M16 0C7.163 0 0 7.163 0 16C0 27 16 40 16 40C16 40 32 27 32 16C32 7.163 24.837 0 16 0Z" fill="${color}"/>
         <circle cx="16" cy="16" r="9" fill="${colorLight}"/>
         <text x="16" y="20.5" text-anchor="middle"
@@ -65,6 +65,25 @@ function MapBridge({ onReady }: { onReady: (map: L.Map) => void }) {
   return null
 }
 
+/** Flies the mini-map to a new position when lat/lng change. */
+function FlyToAlt({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap()
+  useEffect(() => {
+    map.flyTo([lat, lng], Math.max(map.getZoom(), 14), { duration: 0.45 })
+  }, [lat, lng, map])
+  return null
+}
+
+/** Re-measures a Leaflet map once it has settled into its container. */
+function InvalidateOnMount() {
+  const map = useMap()
+  useEffect(() => {
+    const t = window.setTimeout(() => map.invalidateSize(), 200)
+    return () => window.clearTimeout(t)
+  }, [map])
+  return null
+}
+
 interface ItineraryExplorerProps {
   itinerary: Itinerary
   onChange: () => void | Promise<void>
@@ -83,6 +102,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
   const [alternatives, setAlternatives] = useState<PoiSuggestion[]>([])
   const [loadingAlts, setLoadingAlts] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [hoveredAlt, setHoveredAlt] = useState<PoiSuggestion | null>(null)
 
   const mapRef = useRef<L.Map | null>(null)
   const carouselRef = useRef<HTMLDivElement | null>(null)
@@ -95,6 +115,11 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
   const selectedDay = days[selectedIndex] ?? days[0]
   const { color, colorLight } = dayPalette(selectedIndex)
 
+  const replacingStop = useMemo(
+    () => selectedDay.stops.find((s) => s.item_id === sheetItemId) ?? null,
+    [selectedDay.stops, sheetItemId],
+  )
+
   const stops = useMemo(
     () => selectedDay.stops.filter((s) => s.lat && s.lng),
     [selectedDay],
@@ -105,24 +130,41 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
     [stops],
   )
 
+  // Keep the latest coords reachable from callbacks that run on map (re)mount.
+  const dayCoordsRef = useRef(dayCoords)
+  dayCoordsRef.current = dayCoords
+
+  const fitToDay = useCallback((map: L.Map, animate: boolean) => {
+    const coords = dayCoordsRef.current
+    if (coords.length === 0) return
+    if (coords.length === 1) {
+      map.setView(coords[0], 15, { animate })
+    } else {
+      map.fitBounds(L.latLngBounds(coords), { padding: [56, 56], maxZoom: 15, animate })
+    }
+  }, [])
+
   const onMapReady = useCallback((map: L.Map) => {
     mapRef.current = map
-  }, [])
+    // Leaflet measures the container before it has settled into the rounded
+    // card, leaving the tile/overlay panes out of sync (tiles spill out, the
+    // route is drawn askew). Re-measure, then frame the day. This also restores
+    // the view after the map remounts when the Replace sheet closes.
+    window.setTimeout(() => {
+      map.invalidateSize()
+      fitToDay(map, false)
+    }, 0)
+  }, [fitToDay])
 
   // Fit the map to the selected day's route whenever the day changes.
   useEffect(() => {
     setActiveIndex(0)
     const map = mapRef.current
-    if (!map || dayCoords.length === 0) return
-    if (dayCoords.length === 1) {
-      map.setView(dayCoords[0], 15, { animate: true })
-    } else {
-      map.fitBounds(L.latLngBounds(dayCoords), { padding: [56, 56], maxZoom: 15, animate: true })
-    }
+    if (map) fitToDay(map, true)
     // Reset carousel to the first card.
     const el = carouselRef.current
     if (el) el.scrollTo({ left: 0, behavior: 'auto' })
-  }, [dayCoords])
+  }, [dayCoords, fitToDay])
 
   const focusStop = useCallback(
     (index: number, fly: boolean) => {
@@ -207,6 +249,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
     setSheetItemId(itemId)
     setSheetStopName(stopName)
     setAlternatives([])
+    setHoveredAlt(null)
     setLoadingAlts(true)
     try {
       setAlternatives(await getStopAlternatives(itinerary.itinerary_id, itemId))
@@ -218,6 +261,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
   const closeSheet = () => {
     setSheetItemId(null)
     setAlternatives([])
+    setHoveredAlt(null)
   }
 
   const chooseAlternative = async (poiId: string) => {
@@ -248,7 +292,10 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Map with floating glass day selector */}
+      {/* Map with floating glass day selector. Unmounted while the Replace
+          sheet is open, so only the sheet's mini-map is mounted at that time
+          (one Leaflet map on screen, never two). */}
+      {!sheetItemId && (
       <div className="relative rounded-3xl overflow-hidden shadow-lg border border-white/40">
         <MapContainer
           center={center}
@@ -326,6 +373,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
           ))}
         </div>
       </div>
+      )}
 
       {/* Stop carousel — synced to the map */}
       <div
@@ -351,25 +399,81 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
         ))}
       </div>
 
-      {/* Alternatives bottom sheet */}
-      {sheetItemId && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeSheet} />
-          <div className="relative w-full max-w-md glass glass-specular rounded-t-3xl max-h-[80vh] flex flex-col shadow-2xl">
-            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-white/40">
+      {/* Alternatives bottom sheet — portaled to <body> so its mini-map lives
+          outside the main map's DOM subtree and tears down cleanly on close. */}
+      {sheetItemId && createPortal(
+        <div className="fixed inset-0 z-50 flex justify-center" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/40" onClick={closeSheet} />
+          <div className="relative w-full max-w-md h-full bg-white flex flex-col shadow-2xl">
+            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-gray-100 shrink-0">
               <div className="min-w-0">
                 <p className="text-xs text-gray-500 font-medium">Replacing</p>
                 <h3 className="text-base font-bold text-gray-900 truncate">{sheetStopName}</h3>
               </div>
               <button
                 onClick={closeSheet}
-                className="shrink-0 w-8 h-8 rounded-full bg-white/70 flex items-center justify-center text-gray-600 active:scale-95"
+                className="shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 active:scale-95"
               >
                 <X size={16} />
               </button>
             </div>
 
-            <div className="overflow-y-auto px-4 py-3 flex flex-col gap-2">
+            {/* Mini-map — shows the day route with the replacing stop and hovered alternative */}
+            {replacingStop && (
+              <div className="overflow-hidden border-b border-gray-100 h-[45vh] shrink-0">
+                <MapContainer
+                  key={sheetItemId!}
+                  center={[replacingStop.lat, replacingStop.lng]}
+                  zoom={14}
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={false}
+                  scrollWheelZoom={true}
+                  attributionControl={false}
+                >
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    maxZoom={20}
+                  />
+                  <ZoomControl position="bottomright" />
+                  {stops.length > 1 && (
+                    <Polyline
+                      positions={stops.map((s) => [s.lat, s.lng] as [number, number])}
+                      pathOptions={{ color: '#CBD5E1', weight: 2, opacity: 0.6, dashArray: '5 5' }}
+                    />
+                  )}
+                  {stops.map((s, i) => {
+                    const isReplacing = s.item_id === sheetItemId
+                    return (
+                      <Marker
+                        key={s.poi_id}
+                        position={[s.lat, s.lng]}
+                        icon={createPinIcon(
+                          isReplacing ? '#EF4444' : '#94A3B8',
+                          isReplacing ? '#FEE2E2' : '#F8FAFC',
+                          isReplacing ? '×' : String(i + 1),
+                          isReplacing,
+                        )}
+                        zIndexOffset={isReplacing ? 200 : 0}
+                      />
+                    )
+                  })}
+                  {hoveredAlt && (
+                    <Marker
+                      position={[hoveredAlt.lat, hoveredAlt.lng]}
+                      icon={createPinIcon(color, colorLight, '★', true)}
+                      zIndexOffset={500}
+                    />
+                  )}
+                  <InvalidateOnMount />
+                  <FlyToAlt
+                    lat={hoveredAlt?.lat ?? replacingStop.lat}
+                    lng={hoveredAlt?.lng ?? replacingStop.lng}
+                  />
+                </MapContainer>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
               {loadingAlts ? (
                 <div className="flex flex-col gap-2 py-2">
                   {Array.from({ length: 4 }).map((_, i) => (
@@ -385,8 +489,10 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
                     <button
                       key={alt.poi_id}
                       onClick={() => chooseAlternative(alt.poi_id)}
+                      onPointerEnter={() => setHoveredAlt(alt)}
+                      onPointerLeave={() => setHoveredAlt(null)}
                       disabled={busyId !== null}
-                      className="text-left bg-white/80 border border-white/60 rounded-2xl p-2.5 shadow-sm active:scale-[0.99] transition-transform disabled:opacity-50 flex gap-3 items-center"
+                      className="text-left bg-white border border-gray-100 rounded-2xl p-2.5 shadow-sm active:scale-[0.99] transition-transform disabled:opacity-50 flex gap-3 items-center"
                     >
                       <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
                         {altPhoto ? (
@@ -424,7 +530,8 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

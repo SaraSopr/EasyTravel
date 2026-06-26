@@ -357,9 +357,17 @@ async def get_itinerary(
                 transport, travel_min = None, 0.0
 
             if item.arrival_time and item.departure_time:
-                _base = datetime.combine(day_date, item.arrival_time)
-                _end = datetime.combine(day_date, item.departure_time)
-                visit_dur = max(0, int((_end - _base).total_seconds() / 60))
+                visit_dur = max(
+                    0,
+                    int(
+                        (
+                            item.departure_time.hour * 60
+                            + item.departure_time.minute
+                            - item.arrival_time.hour * 60
+                            - item.arrival_time.minute
+                        )
+                    ),
+                )
             else:
                 visit_dur = 0
 

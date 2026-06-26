@@ -82,9 +82,7 @@ export default function Itinerary() {
               </div>
             )}
 
-            <p className="text-xs text-gray-400 px-1">
-              Tap a point on the map or scroll the stops: map and cards always stay in sync.
-            </p>
+            
 
             <ItineraryExplorer itinerary={itinerary} onChange={refetch} />
           </div>

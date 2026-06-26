@@ -33,6 +33,8 @@ export interface EvalPair {
 export interface EvalStop {
   position: number
   name: string
+  lat: number
+  lng: number
   arrival_time: string | null
   departure_time: string | null
   transport_from_previous: string | null

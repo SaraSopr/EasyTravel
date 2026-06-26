@@ -144,6 +144,8 @@ MMR_MIN_DISTANCE_M: float = 150.0
 
 # Activity POIs beyond this radius from the city center are excluded before clustering
 # (prevents out-of-city day-trip destinations like Aranjuez appearing in urban itineraries).
+# This is the hard ceiling; the effective radius is usually tighter (see
+# resolve_activity_radius_m, which adapts it to each city's POI distribution).
 MAX_CITY_RADIUS_KM: float = 20.0
 
 SENIOR_AGE_RANGES: frozenset[str] = frozenset({"60-70", "65+", "70+", "70-80", "80+"})
@@ -203,6 +205,55 @@ def is_meal_poi(poi: Poi) -> bool:
     primary_not_snack = primary_type not in SNACK_SERVICE_TYPES
     correct_category = poi.travel_category in ("food", None)
     return has_meal_type and primary_not_snack and correct_category
+
+
+# Primary Google types that mark a venue as takeaway/delivery rather than a sit-down
+# meal — penalised (not excluded) so a proper restaurant wins when one is nearby.
+TAKEAWAY_PRIMARY_TYPES: frozenset[str] = frozenset({"meal_takeaway", "meal_delivery"})
+
+
+def is_takeaway_food(poi: Poi) -> bool:
+    """True if the POI's primary type is takeaway/delivery (not a proper meal venue)."""
+    return (poi.types or [""])[0] in TAKEAWAY_PRIMARY_TYPES
+
+
+def score_food_candidate(poi: Poi, dist_m: float, popularity: float, radius_m: float) -> float:
+    """Quality-aware meal score: proximity + rating, minus a takeaway penalty.
+
+    Proximity decays linearly to 0 at ``radius_m``; rating is the Google rating
+    normalised to 0..1 (unrated → 3.5/5). Popularity is a tiny tie-break only, so
+    a hugely-reviewed tourist trap can't outrank a closer, better-rated trattoria.
+    """
+    proximity = max(0.0, 1.0 - dist_m / radius_m) if radius_m > 0 else 0.0
+    rating = (poi.rating if poi.rating is not None else 3.5) / 5.0
+    score = settings.food_w_distance * proximity + settings.food_w_rating * rating
+    if is_takeaway_food(poi):
+        score -= settings.food_takeaway_penalty
+    return score + 0.01 * popularity
+
+
+def pick_best_food(
+    eligible: list[tuple[Poi, float]], popularity_scores: dict | None
+) -> Poi | None:
+    """Best meal among eligible ``(poi, distance_m)`` by quality-aware score.
+
+    Candidates within ``settings.food_pick_radius_m`` are ranked by
+    ``score_food_candidate`` (proximity + rating − takeaway penalty). If none sit
+    within the radius (sparse area), falls back to the strictly nearest so a meal is
+    always placed. Returns ``None`` only when ``eligible`` is empty.
+    """
+    if not eligible:
+        return None
+    radius_m = settings.food_pick_radius_m
+    within = [pd for pd in eligible if pd[1] <= radius_m]
+    if not within:
+        return min(eligible, key=lambda pd: pd[1])[0]
+    return max(
+        within,
+        key=lambda pd: score_food_candidate(
+            pd[0], pd[1], (popularity_scores or {}).get(pd[0].id, 0.5), radius_m
+        ),
+    )[0]
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +424,11 @@ def resolve_activity_radius_m(
     ``activity_radius_km`` as the compact-city floor, then expands to cover a
     configurable share/count of the candidate POI distribution, capped by the
     hard city radius to avoid day-trip outliers.
+
+    Note: tightening the radius below the floor was tried and reverted — it helps
+    spread cities but degrades compact ones (Madrid). The robust lever for the
+    multi-day spread problem is conditional pre-clustering in the TOPTW solver, not
+    the radius (see toptw_solver._should_pre_cluster).
     """
     min_radius_m = max(0.0, min(settings.activity_radius_km, MAX_CITY_RADIUS_KM)) * 1000
     max_radius_m = MAX_CITY_RADIUS_KM * 1000
@@ -1094,9 +1150,7 @@ def _schedule_day(
         """
         _lat = pos_lat if pos_lat is not None else current_lat
         _lng = pos_lng if pos_lng is not None else current_lng
-        best_poi: Poi | None = None
-        best_dist = float("inf")
-        best_pop = -1.0
+        eligible: list[tuple[Poi, float]] = []
         for fp in remaining_food:
             if fp.id in used_food:
                 continue
@@ -1106,13 +1160,8 @@ def _schedule_day(
                 continue
             if not is_food_price_acceptable(fp, max_food_price_level):
                 continue
-            d = haversine_m(_lat, _lng, fp.lat, fp.lng)
-            pop = _pop.get(fp.id, 0.5)
-            if d < best_dist or (abs(d - best_dist) < 200 and pop > best_pop):
-                best_dist = d
-                best_pop = pop
-                best_poi = fp
-        return best_poi
+            eligible.append((fp, haversine_m(_lat, _lng, fp.lat, fp.lng)))
+        return pick_best_food(eligible, _pop)
 
     for ap, sim_score in activity_candidates:
         if ap.id in used_activity:

@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 /* Leaflet popup overrides */
+.leaflet-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
 .leaflet-popup-content-wrapper {
   border-radius: 14px !important;
   padding: 0 !important;

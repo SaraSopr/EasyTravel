@@ -5,8 +5,17 @@ import {
   getPairs, postRating, getEvalItineraries, postLikert,
   type EvalPair, type EvalItinerary,
 } from '@/api/evaluation'
+import ItineraryMap from '@/components/ItineraryMap'
+import type { ItineraryDay } from '@/types'
 
 type Tab = 'pairs' | 'likert'
+
+// Mirror ItineraryTimeline's transport glyphs so realism reads the same here.
+function transportLabel(mode: string | null): string {
+  if (mode === 'driving' || mode === 'taxi') return '🚗'
+  if (mode === 'transit') return '🚌'
+  return '🚶'
+}
 
 function ProfileCard({ profile }: { profile: EvalPair['profile'] }) {
   const interests = Object.entries(profile.interests ?? {})
