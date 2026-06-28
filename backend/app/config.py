@@ -121,6 +121,13 @@ class Settings(BaseSettings):
         True,
         validation_alias=AliasChoices("TOPTW_CLUSTER_FULL_POOL", "ITINERARY_TOPTW_CLUSTER_FULL_POOL"),
     )
+    # Stage-2 per-day re-sequencing: after the multi-vehicle solver picks which POIs
+    # go on which day, a single-vehicle TSPTW tightens each day's visiting order
+    # (the multi-vehicle search leaves it ~1.6x longer than a tight TSP).
+    toptw_reorder_days: bool = Field(
+        True,
+        validation_alias=AliasChoices("TOPTW_REORDER_DAYS", "ITINERARY_TOPTW_REORDER_DAYS"),
+    )
     cache_ttl_days: int = 30
     cloudflare_r2_access_key_id: str | None = None
     cloudflare_r2_secret_access_key: str | None = None

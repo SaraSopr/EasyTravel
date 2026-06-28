@@ -356,6 +356,84 @@ def _solve(
     return days
 
 
+def _reorder_day_tsptw(
+    ordered: list[tuple["Poi", float]],
+    travel_lookup: "TravelLookup",
+    walk_threshold_m: float,
+    s_lat: float,
+    s_lng: float,
+    day_start_min: int,
+    day_total_s: int,
+    day_date,
+) -> list[tuple["Poi", float]]:
+    """Re-sequence one day's already-selected activities to minimise real travel
+    time, respecting opening-hour windows.
+
+    The multi-vehicle TOPTW optimises POI *selection* and *day assignment* well, but
+    spends its search budget on the global inclusion problem and leaves each day's
+    visiting order ~1.6x longer than a tight TSP (measured on Roma 3gg). This cheap
+    single-vehicle TSPTW pass tightens the order without changing which POIs are on
+    the day — a classic selection-then-sequencing decomposition. An open path is
+    modelled via a zero-cost dummy end node so we don't pay a return-to-depot leg.
+
+    Falls back to the input order if the day is trivial or the model is infeasible.
+    """
+    if len(ordered) <= 2:
+        return ordered
+    from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+
+    gday = (day_date.weekday() + 1) % 7
+    poi_nodes: list[_Node] = []
+    for poi, sim in ordered:
+        _, visit_dur, _ = resolve_visit_mode(poi, sim)
+        node = _Node(poi.lat, poi.lng, poi=poi, sim=sim, service_s=int(visit_dur * 60))
+        node.window = time_window_seconds(poi, gday, day_start_min, day_total_s)
+        poi_nodes.append(node)
+    # nodes: [start depot] + activities + [zero-cost dummy end] → open path
+    nodes = [_Node(s_lat, s_lng), *poi_nodes, _Node(s_lat, s_lng)]
+    travel = _build_travel_seconds(nodes, travel_lookup, walk_threshold_m)
+    end_idx = len(nodes) - 1
+    for i in range(len(nodes)):
+        travel[i][end_idx] = 0
+        travel[end_idx][i] = 0
+
+    manager = pywrapcp.RoutingIndexManager(len(nodes), 1, [0], [end_idx])
+    routing = pywrapcp.RoutingModel(manager)
+
+    def time_cb(fi: int, ti: int) -> int:
+        f = manager.IndexToNode(fi)
+        t = manager.IndexToNode(ti)
+        return travel[f][t] + nodes[f].service_s
+
+    tidx = routing.RegisterTransitCallback(time_cb)
+    routing.SetArcCostEvaluatorOfAllVehicles(tidx)
+    routing.AddDimension(tidx, _SLACK_MAX_S, day_total_s, True, "Time")
+    tdim = routing.GetDimensionOrDie("Time")
+    for local_i, node in enumerate(poi_nodes, start=1):
+        if node.window is not None:
+            open_s, close_s = node.window
+            tdim.CumulVar(manager.NodeToIndex(local_i)).SetRange(open_s, close_s)
+
+    params = pywrapcp.DefaultRoutingSearchParameters()
+    params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    params.local_search_metaheuristic = (
+        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    )
+    params.time_limit.seconds = 3
+    solution = routing.SolveWithParameters(params)
+    if not solution:
+        return ordered
+
+    result: list[tuple["Poi", float]] = []
+    index = routing.Start(0)
+    while not routing.IsEnd(index):
+        node = nodes[manager.IndexToNode(index)]
+        if node.poi is not None:
+            result.append((node.poi, node.sim))
+        index = solution.Value(routing.NextVar(index))
+    return result if len(result) == len(ordered) else ordered
+
+
 # ---------------------------------------------------------------------------
 # Meal post-insertion (decision #1) + time propagation on the optimised route
 # ---------------------------------------------------------------------------
@@ -737,6 +815,15 @@ async def plan(
         if not ordered:
             warnings.append(f"Day {day_idx + 1} has no scheduled activities.")
             continue
+
+        # Stage 2: tighten the day's visiting order (the multi-vehicle solver leaves
+        # it ~1.6x longer than a TSP). Runs before meal insertion so meals are placed
+        # along the final, compact route.
+        if settings.toptw_reorder_days:
+            ordered = _reorder_day_tsptw(
+                ordered, travel_lookup, walk_threshold_m, s_lat, s_lng,
+                day_start_min, day_total_s, day_date,
+            )
 
         available_food = [p for p in food_pois if p.id not in used_food_ids]
         stops = schedule_day_route(
