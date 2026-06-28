@@ -319,3 +319,19 @@ def test_transit_legs_use_driving_matrix_scaled():
     out_mode, minutes = _travel("A", o[0], o[1], "B", d[0], d[1], lookup, 1250)
     assert out_mode == "transit"
     assert minutes == 6.0 * settings.transit_driving_factor
+
+
+def test_dedupe_nearby_pois_collapses_coincident_keeps_distinct():
+    """Near-coincident POIs collapse to the most-reviewed; distinct neighbours stay."""
+    from app.services.itinerary_planner import _dedupe_nearby_pois
+
+    sistine = _poi("Sistine Chapel", dlat=0.0, dlng=0.0, user_ratings_total=50_000)
+    last_judgment = _poi("The Last Judgment", dlat=0.00002, dlng=0.00002, user_ratings_total=800)  # ~3 m
+    neighbour = _poi("Nearby museum", dlat=0.002, dlng=0.0, user_ratings_total=90_000)  # ~220 m
+
+    kept = _dedupe_nearby_pois([last_judgment, sistine, neighbour], radius_m=30.0)
+    names = {p.name for p in kept}
+
+    assert "The Last Judgment" not in names      # collapsed
+    assert "Sistine Chapel" in names             # canonical (more reviews) survives
+    assert "Nearby museum" in names              # distinct neighbour preserved

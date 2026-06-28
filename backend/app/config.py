@@ -28,6 +28,13 @@ class Settings(BaseSettings):
         1.5,
         validation_alias=AliasChoices("TRANSIT_DRIVING_FACTOR",),
     )
+    # Collapse near-coincident activity POIs (same spot, different names — e.g.
+    # "Sistine Chapel" + "The Last Judgment", ~2 m apart). Tiny radius so distinct
+    # neighbouring attractions are never merged. 0 disables.
+    dedup_radius_m: float = Field(
+        30.0,
+        validation_alias=AliasChoices("DEDUP_RADIUS_M",),
+    )
     # ── Personalized walking threshold (transport-mode selection) ─────────
     # select_transport() picks "walking" below the cut-off, "transit"/"taxi"
     # above. Personalization scales the base cut-off by the traveller's age and

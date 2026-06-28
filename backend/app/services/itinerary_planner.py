@@ -401,6 +401,29 @@ def is_landmark_poi(poi: Poi) -> bool:
     return (poi.user_ratings_total or 0) >= LANDMARK_THRESHOLD
 
 
+def _dedupe_nearby_pois(pois: list[Poi], radius_m: float) -> list[Poi]:
+    """Drop near-coincident POIs that are really the same place under different names
+    (e.g. "Sistine Chapel" and "The Last Judgment", ~2 m apart). For each cluster of
+    POIs within ``radius_m`` of an already-kept one, only the most-reviewed (then
+    highest-rated) survivor is kept — the canonical venue. The radius is deliberately
+    tiny (~30 m): genuinely distinct attractions are essentially never that close
+    centre-to-centre, so this won't merge neighbours like a museum and an adjacent
+    church.
+    """
+    # Most "canonical" first: more reviews, then higher rating.
+    ordered = sorted(
+        pois,
+        key=lambda p: ((p.user_ratings_total or 0), (p.rating or 0.0)),
+        reverse=True,
+    )
+    kept: list[Poi] = []
+    for p in ordered:
+        if any(haversine_m(p.lat, p.lng, k.lat, k.lng) <= radius_m for k in kept):
+            continue
+        kept.append(p)
+    return kept
+
+
 def apply_novelty_penalty(
     score: float,
     poi_id: object,
@@ -1373,7 +1396,9 @@ def _schedule_day(
             _, visit_dur, _ = resolve_visit_mode(ap, sim_score)
             departure = arrival + timedelta(minutes=visit_dur)
             if departure > end_dt:
-                break
+                # This POI doesn't fit, but a later (shorter/closer) candidate
+                # still might — keep scanning instead of ending the day here.
+                continue
 
             used_activity.add(ap.id)
             selected_activities.append((ap, sim_score))
@@ -1517,6 +1542,27 @@ def _schedule_day(
 
         if not _add_activity_stop(act, sim_score):
             break  # day is full
+
+    # --- Refill: the TSP reorder usually shortens total travel vs the Pass-1
+    # path, so time often frees up at the tail. Try to insert activities Pass-1
+    # skipped for lack of time, in MMR (relevance) order. Opening hours are
+    # re-checked here (Pass 1 vetted a different arrival time); end_dt, the
+    # dinner slot and per-type caps are enforced by _add_activity_stop. ---
+    deferred_ids = {p.id for p, _ in deferred_activities}
+    refill_pool = [
+        (ap, s) for ap, s in activity_candidates
+        if ap.id not in used_activity and ap.id not in deferred_ids
+    ]
+    for ap, sim_score in refill_pool:
+        _, refill_travel = _travel(
+            cur_id, cur_lat, cur_lng, ap.id, ap.lat, ap.lng,
+            travel_lookup, walk_threshold_m,
+        )
+        if not _is_open(ap, cur + timedelta(minutes=refill_travel)):
+            continue
+        if _add_activity_stop(ap, sim_score):
+            used_activity.add(ap.id)
+            logger.info("Refill: added %s after TSP freed up time", ap.name)
 
     # After loop: insert any meal not yet added (e.g. all activities finished before meal time).
     # Only insert if at least one activity was scheduled — a day with only food stops makes
@@ -1710,6 +1756,17 @@ async def generate(
     # For family travel: exclude nightlife POIs (bars, clubs, casinos) from activities
     if travel_mode == "family":
         activity_pois = [p for p in activity_pois if p.travel_category != "nightlife"]
+
+    # Collapse near-coincident POIs (e.g. "Sistine Chapel" + "The Last Judgment" sit
+    # ~2 m apart) so the planner never schedules two stops for the same spot.
+    if settings.dedup_radius_m > 0:
+        before_dedup = len(activity_pois)
+        activity_pois = _dedupe_nearby_pois(activity_pois, settings.dedup_radius_m)
+        if len(activity_pois) < before_dedup:
+            logger.info(
+                "Near-duplicate dedup: %d → %d activities (radius=%.0fm)",
+                before_dedup, len(activity_pois), settings.dedup_radius_m,
+            )
 
     logger.info(
         "POIs after touristic filter: %d activities, %d food",
