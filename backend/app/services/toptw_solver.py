@@ -708,20 +708,39 @@ async def plan(
             (sum(p.lat for p in z) / len(z), sum(p.lng for p in z) / len(z))
             for z in ordered_clusters
         ]
-        zone_of = {p.id: zi for zi, z in enumerate(ordered_clusters) for p in z}
 
-        # Group the prize candidates by their zone (nearest centroid if a candidate
-        # wasn't in the clustered pool — only possible on the full-pool path for a POI
-        # the radius filter dropped from activity_pois, so practically never).
         cand_by_day: dict = {zi: [] for zi in range(len(ordered_clusters))}
-        for c in candidates:
-            zi = zone_of.get(c[0].id)
-            if zi is None:
-                zi = min(
-                    range(len(zone_centroids)),
-                    key=lambda k: haversine_m(c[0].lat, c[0].lng, *zone_centroids[k]),
+        if settings.toptw_cluster_full_pool:
+            # Pick each zone's OWN top-K by prize instead of slicing a single global
+            # top-N across zones. A prize-skewed global top-N (user preference + novelty
+            # history) otherwise piles candidates into one or two zones and starves the
+            # rest (observed [51, 21, 8] → balance 0.30 → "auto" collapses to global
+            # TOPTW and the days mix zones). Per-zone selection keeps every
+            # geographically valid zone viable, so the balance gate passes. The global
+            # candidate list is rebuilt as the union (with each POI's prize/sim).
+            per_zone_n = max(1, -(-n // num_days))  # ceil(n / num_days)
+            rebuilt: list = []
+            for zi, zone_pois in enumerate(ordered_clusters):
+                zone_cands = select_candidates(
+                    zone_pois, uvec, popularity_scores,
+                    confirmed_visited_ids, previously_suggested_ids,
+                    per_zone_n, settings.toptw_w_sim, settings.toptw_w_pop,
                 )
-            cand_by_day[zi].append(c[0])
+                cand_by_day[zi] = [c[0] for c in zone_cands]
+                rebuilt.extend(zone_cands)
+            candidates = rebuilt
+        else:
+            # Candidate-clustering path: assign the global prize candidates to the zone
+            # that geographically contains them (nearest centroid as a fallback).
+            zone_of = {p.id: zi for zi, z in enumerate(ordered_clusters) for p in z}
+            for c in candidates:
+                zi = zone_of.get(c[0].id)
+                if zi is None:
+                    zi = min(
+                        range(len(zone_centroids)),
+                        key=lambda k: haversine_m(c[0].lat, c[0].lng, *zone_centroids[k]),
+                    )
+                cand_by_day[zi].append(c[0])
 
         # Balance is measured on the CANDIDATES per day (what the solver can actually
         # schedule) — a zone dense in the pool but thin in candidates still starves
