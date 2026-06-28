@@ -9,10 +9,30 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 10080
     google_places_api_key: str = ""
     google_places_enabled: bool = False
-    # Google Routes API (Compute Route Matrix) for real road travel times.
-    # May reuse google_places_api_key if Routes API is enabled on the same key.
+    # Real road travel times (replaces haversine). Provider-agnostic master switch.
+    routes_api_enabled: bool = False  # if False → always haversine
+    # Routing provider for the travel-time matrix:
+    #   "ors"    — OpenRouteService (hosted, free key, no billing; foot + car). Default.
+    #   "google" — Google Routes API Compute Route Matrix (needs billing).
+    routing_provider: str = "ors"
+    # OpenRouteService key — free at openrouteservice.org/dev (40 req/min, 500/day).
+    openrouteservice_api_key: str = ""
+    # Google Routes API (Compute Route Matrix). May reuse google_places_api_key if
+    # Routes API is enabled on the same key. Only used when routing_provider="google".
     google_routes_api_key: str = ""
-    routes_api_enabled: bool = False  # master switch: if False → always haversine
+    # ── Personalized walking threshold (transport-mode selection) ─────────
+    # select_transport() picks "walking" below the cut-off, "transit"/"taxi"
+    # above. Personalization scales the base cut-off by the traveller's age and
+    # relax preference: a young/intense profile walks further (so more legs get
+    # real ORS foot routing instead of an estimated transit leg), a senior/relax
+    # profile switches to transit sooner. The master switch off = fixed base
+    # cut-off for all (thesis A/B baseline). Computed once per generation.
+    walk_personalization: bool = True
+    walk_threshold_base_m: float = 800.0   # fixed cut-off when personalization is off
+    walk_threshold_min_m: float = 350.0    # clamp floor (never below)
+    walk_threshold_max_m: float = 2000.0   # clamp ceiling (never above)
+    walk_relax_base: float = 1.15          # relax factor = base − slope·relax (relax∈[0,1])
+    walk_relax_slope: float = 0.45
     # Itinerary solver selection (see docs/toptw-itinerary-solver-spec.md):
     #   "greedy" — current cluster→MMR→greedy pipeline (baseline)
     #   "toptw"  — Team Orienteering Problem with Time Windows (OR-Tools)
@@ -72,6 +92,27 @@ class Settings(BaseSettings):
     # this fraction of an even share (size / (N/num_days)). 1.0 = perfectly balanced;
     # Madrid ≈ 0.01 (degenerate), Roma ≈ 0.84 (balanced). 0.35 separates them.
     toptw_cluster_balance_min: float = 0.35
+    # Intra-cluster outlier pruning (only when pre-cluster is ON): drop a non-landmark
+    # POI whose nearest same-day neighbour is farther than this, so one stray park/site
+    # doesn't inflate the day's travel. 0 disables. Thesis A/B via the env alias.
+    toptw_prune_outliers: bool = Field(
+        True,
+        validation_alias=AliasChoices("TOPTW_PRUNE_OUTLIERS", "ITINERARY_TOPTW_PRUNE_OUTLIERS"),
+    )
+    toptw_cluster_outlier_max_nn_m: float = Field(
+        1500.0,
+        validation_alias=AliasChoices("TOPTW_CLUSTER_OUTLIER_MAX_NN_M",),
+    )
+    # Outlier pruning never drops a POI this famous (true must-sees). Deliberately far
+    # above LANDMARK_THRESHOLD (10k) so a far-flung 20k-review park is still prunable.
+    toptw_outlier_protect_min_ratings: int = 100_000
+    # Pre-cluster on the full activity pool (like the greedy baseline) instead of just
+    # the prize-filtered top-N. Cleaner, more recognisable day-zones; also avoids the
+    # degenerate sparse-candidate split. Candidates are pinned to the zone holding them.
+    toptw_cluster_full_pool: bool = Field(
+        True,
+        validation_alias=AliasChoices("TOPTW_CLUSTER_FULL_POOL", "ITINERARY_TOPTW_CLUSTER_FULL_POOL"),
+    )
     cache_ttl_days: int = 30
     cloudflare_r2_access_key_id: str | None = None
     cloudflare_r2_secret_access_key: str | None = None
@@ -92,6 +133,7 @@ class Settings(BaseSettings):
     # tourism validation → guarantees valid JSON, removes parse-failure retries.
     # Default off so the base run is unchanged; flip to true after a small test.
     openai_structured_output: bool = False
+    pipeline_verbose: bool = False
     cors_origins: list[str] = ["http://localhost:5173"]
     dev_mode: bool = False
     dev_user_email: str = ""

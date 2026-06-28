@@ -31,8 +31,8 @@ from app.services.itinerary_planner import (
     DINNER_MIN_H,
     DINNER_TARGET_H,
     LANDMARK_BOOST,
-    LANDMARK_THRESHOLD,
     LUNCH_TARGET_H,
+    DEFAULT_WALK_THRESHOLD_M,
     MEAL_WINDOW_MIN,
     _PRIMARY_TYPE_DAY_CAP,
     _SCHED_TO_DB_MODE,
@@ -42,6 +42,7 @@ from app.services.itinerary_planner import (
     _poi_vec,
     _travel,
     apply_novelty_penalty,
+    is_landmark_poi,
     get_food_duration,
     haversine_m,
     is_food_price_acceptable,
@@ -84,7 +85,7 @@ def compute_prize(
     sim = _cosine_sim(_poi_vec(poi), uvec)
     pop = (popularity_scores or {}).get(poi.id, 0.5)
     prize = w_sim * sim + w_pop * pop
-    if (poi.user_ratings_total or 0) >= LANDMARK_THRESHOLD:
+    if is_landmark_poi(poi):
         prize += LANDMARK_BOOST
     return prize, sim
 
@@ -161,7 +162,10 @@ def select_candidates(
     scored: list[tuple["Poi", float, float]] = []
     for poi in activity_pois:
         prize, sim = compute_prize(poi, uvec, popularity_scores, w_sim, w_pop)
-        prize = apply_novelty_penalty(prize, poi.id, confirmed_visited_ids, previously_suggested_ids)
+        prize = apply_novelty_penalty(
+            prize, poi.id, confirmed_visited_ids, previously_suggested_ids,
+            is_landmark=is_landmark_poi(poi),
+        )
         scored.append((poi, prize, sim))
     scored.sort(key=lambda t: t[1], reverse=True)
     return scored[:n]
@@ -191,6 +195,7 @@ class _Node:
 def _build_travel_seconds(
     nodes: list[_Node],
     travel_lookup: "TravelLookup",
+    walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
 ) -> list[list[int]]:
     """Full node×node travel-time matrix (seconds).
 
@@ -208,7 +213,7 @@ def _build_travel_seconds(
                 continue
             b = nodes[j]
             dist = haversine_m(a.lat, a.lng, b.lat, b.lng)
-            mode, hav_min = select_transport(dist)
+            mode, hav_min = select_transport(dist, walk_threshold_m)
             seconds = int(hav_min * 60)
             if travel_lookup and a.poi_id is not None and b.poi_id is not None:
                 hit = travel_lookup.get((a.poi_id, b.poi_id, _SCHED_TO_DB_MODE[mode]))
@@ -233,6 +238,7 @@ def _solve(
     prize_scale: int,
     time_limit_s: int,
     day_assignment: dict | None = None,
+    walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
 ) -> list[list[tuple["Poi", float]]] | None:
     """Build and solve the TOPTW model. Returns per-day ordered ``[(poi, sim)]``.
 
@@ -281,7 +287,7 @@ def _solve(
     manager = pywrapcp.RoutingIndexManager(len(nodes), num_days, starts, ends)
     routing = pywrapcp.RoutingModel(manager)
 
-    travel_seconds = _build_travel_seconds(nodes, travel_lookup)
+    travel_seconds = _build_travel_seconds(nodes, travel_lookup, walk_threshold_m)
 
     def time_cb(from_index: int, to_index: int) -> int:
         f = manager.IndexToNode(from_index)
@@ -395,6 +401,7 @@ def schedule_day_route(
     popularity_scores: dict,
     travel_lookup: "TravelLookup",
     max_food_price_level: int | None = None,
+    walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
 ) -> list[_Stop]:
     """Turn the solver's ordered activities into timed ``_Stop``s + insert meals.
 
@@ -422,7 +429,8 @@ def schedule_day_route(
             transport, travel_min = None, 0.0
         else:
             transport, travel_min = _travel(
-                cur_id, cur_lat, cur_lng, food_poi.id, food_poi.lat, food_poi.lng, travel_lookup
+                cur_id, cur_lat, cur_lng, food_poi.id, food_poi.lat, food_poi.lng,
+                travel_lookup, walk_threshold_m,
             )
         arrival = forced_arrival if forced_arrival is not None else cur + timedelta(minutes=travel_min)
         vm, vd, vn = resolve_visit_mode(food_poi, 1.0)
@@ -461,7 +469,8 @@ def schedule_day_route(
             transport, travel_min = None, 0.0
         else:
             transport, travel_min = _travel(
-                cur_id, cur_lat, cur_lng, poi.id, poi.lat, poi.lng, travel_lookup
+                cur_id, cur_lat, cur_lng, poi.id, poi.lat, poi.lng,
+                travel_lookup, walk_threshold_m,
             )
         arrival = cur + timedelta(minutes=travel_min)
         # The solver may have used waiting (slack) to reach this POI's opening time;
@@ -524,7 +533,9 @@ def schedule_day_route(
             meal_only=False, max_price_level=max_food_price_level,
         )
         if fp is not None:
-            _, travel_min = _travel(cur_id, cur_lat, cur_lng, fp.id, fp.lat, fp.lng, travel_lookup)
+            _, travel_min = _travel(
+                cur_id, cur_lat, cur_lng, fp.id, fp.lat, fp.lng, travel_lookup, walk_threshold_m
+            )
             arrival = cur + timedelta(minutes=travel_min)
             dinner_min_dt = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
             if arrival < dinner_min_dt and dinner_min_dt + timedelta(minutes=get_food_duration(fp)) <= end_dt:
@@ -557,6 +568,7 @@ async def plan(
     end_lng: float | None = None,
     session=None,
     max_food_price_level: int | None = None,
+    walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
 ) -> tuple[list[list[_Stop]], list[str]]:
     """Plan a multi-day itinerary with the TOPTW solver.
 
@@ -588,26 +600,77 @@ async def plan(
     day_assignment: dict | None = None
     mode = (settings.toptw_pre_cluster_mode or "auto").strip().lower()
     if mode != "off" and num_days > 1:
-        from app.services.itinerary_planner import _cluster_pois
+        from app.services.itinerary_planner import (
+            _cluster_pois, _rebalance_clusters, _prune_cluster_outliers, haversine_m,
+        )
 
-        clusters = _cluster_pois([c[0] for c in candidates], num_days, city_lat, city_lng)
-        # Order clusters → day indices deterministically (west→east by centroid lng),
+        # Cluster the FULL activity pool (not just the prize-filtered top-N) so the
+        # day-zones reflect the city's real geographic density — the same input the
+        # greedy baseline uses, which yields cleaner, more recognisable zones and
+        # sidesteps the degenerate [38, 38, 4] split the sparse top-N produced (which
+        # otherwise drove "auto" to fall back to a sprawling global TOPTW). Candidates
+        # are then pinned to the zone that geographically contains them.
+        cluster_pool = (
+            activity_pois if settings.toptw_cluster_full_pool else [c[0] for c in candidates]
+        )
+        clusters = _rebalance_clusters(_cluster_pois(cluster_pool, num_days, city_lat, city_lng))
+        # Order zones → day indices deterministically (west→east by centroid lng),
         # capping at num_days so an over-split never produces an out-of-range day.
         ordered_clusters = sorted(
             (pois for pois in clusters.values() if pois),
             key=lambda ps: sum(p.lng for p in ps) / len(ps),
         )[:num_days]
-        sizes = [len(c) for c in ordered_clusters]
-        # Balance = smallest cluster ÷ even share. 1.0 = perfectly balanced;
-        # a degenerate core+periphery split → near 0.
+        zone_centroids = [
+            (sum(p.lat for p in z) / len(z), sum(p.lng for p in z) / len(z))
+            for z in ordered_clusters
+        ]
+        zone_of = {p.id: zi for zi, z in enumerate(ordered_clusters) for p in z}
+
+        # Group the prize candidates by their zone (nearest centroid if a candidate
+        # wasn't in the clustered pool — only possible on the full-pool path for a POI
+        # the radius filter dropped from activity_pois, so practically never).
+        cand_by_day: dict = {zi: [] for zi in range(len(ordered_clusters))}
+        for c in candidates:
+            zi = zone_of.get(c[0].id)
+            if zi is None:
+                zi = min(
+                    range(len(zone_centroids)),
+                    key=lambda k: haversine_m(c[0].lat, c[0].lng, *zone_centroids[k]),
+                )
+            cand_by_day[zi].append(c[0])
+
+        # Balance is measured on the CANDIDATES per day (what the solver can actually
+        # schedule) — a zone dense in the pool but thin in candidates still starves
+        # its day.
+        sizes = [len(cand_by_day[zi]) for zi in range(len(ordered_clusters))]
         total = sum(sizes)
         even_share = total / num_days if num_days else 0
         balance = (min(sizes) / even_share) if (sizes and even_share) else 0.0
 
         if mode == "on" or (mode == "auto" and balance >= settings.toptw_cluster_balance_min):
-            day_assignment = {p.id: day_idx for day_idx, pois in enumerate(ordered_clusters) for p in pois}
+            # Drop intra-day outliers (a stray candidate far from its day's other stops)
+            # so one isolated park/site doesn't inflate the day's travel. Pruned POIs
+            # leave the candidate pool entirely — otherwise they'd be un-pinned
+            # (day_assignment.get → None) and free to slot on any day, the opposite of
+            # pruning. Must-sees are protected inside _prune_cluster_outliers.
+            if settings.toptw_prune_outliers and settings.toptw_cluster_outlier_max_nn_m > 0:
+                cand_by_day, dropped_ids = _prune_cluster_outliers(
+                    cand_by_day,
+                    settings.toptw_cluster_outlier_max_nn_m,
+                    settings.toptw_outlier_protect_min_ratings,
+                )
+                if dropped_ids:
+                    candidates = [c for c in candidates if c[0].id not in dropped_ids]
+                    sizes = [len(cand_by_day[zi]) for zi in range(len(ordered_clusters))]
+                    logger.info(
+                        "TOPTW pruned %d intra-cluster outlier(s) (max_nn=%.0fm) sizes=%s",
+                        len(dropped_ids), settings.toptw_cluster_outlier_max_nn_m, sizes,
+                    )
+            day_assignment = {p.id: day for day, pois in cand_by_day.items() for p in pois}
             logger.info(
-                "TOPTW pre-cluster ON (mode=%s balance=%.2f sizes=%s)", mode, balance, sizes
+                "TOPTW pre-cluster ON (mode=%s balance=%.2f sizes=%s pool=%s)",
+                mode, balance, sizes,
+                "full" if settings.toptw_cluster_full_pool else "candidates",
             )
         else:
             logger.info(
@@ -634,7 +697,9 @@ async def plan(
     travel_lookup: TravelLookup = {}
     if session is not None and settings.routes_api_enabled:
         try:
-            travel_lookup = await prefetch_travel_matrix(session, [c[0] for c in candidates])
+            travel_lookup = await prefetch_travel_matrix(
+                session, [c[0] for c in candidates], walk_threshold_m
+            )
         except Exception as exc:  # routing must never block generation
             logger.warning("TOPTW travel-matrix prefetch failed (%s) — using haversine", exc)
 
@@ -650,7 +715,7 @@ async def plan(
         candidates, num_days, day_start_min, day_total_s, budget_s, day_dates,
         s_lat, s_lng, e_lat, e_lng, travel_lookup,
         settings.toptw_prize_scale, settings.toptw_time_limit_s,
-        day_assignment,
+        day_assignment, walk_threshold_m,
     )
 
     if solver_days is None:
@@ -677,6 +742,7 @@ async def plan(
             ordered, available_food, used_food_ids,
             day_date, start_dt, end_dt, s_lat, s_lng,
             popularity_scores, travel_lookup, max_food_price_level,
+            walk_threshold_m,
         )
         if not stops:
             warnings.append(f"Day {day_idx + 1} has no schedulable activities.")

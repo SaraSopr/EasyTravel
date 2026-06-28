@@ -148,7 +148,23 @@ MMR_MIN_DISTANCE_M: float = 150.0
 # resolve_activity_radius_m, which adapts it to each city's POI distribution).
 MAX_CITY_RADIUS_KM: float = 20.0
 
-SENIOR_AGE_RANGES: frozenset[str] = frozenset({"60-70", "65+", "70+", "70-80", "80+"})
+# Senior age buckets (see app.constants.AGE_RANGES). "55-70" and "70+" are the
+# current senior cohorts; "55+" is the legacy bucket kept for rows stored before
+# the split (reads stay tolerant — new input is validated to the canonical set).
+SENIOR_AGE_RANGES: frozenset[str] = frozenset({"55-70", "70+", "55+"})
+
+# Per-age multiplier on the base walking cut-off: how far each cohort is willing
+# to walk before switching to transit/taxi. Missing/unknown age → 1.0 (neutral).
+# "55+" is the legacy value (≈ the 55-70 bucket) for already-stored profiles.
+_AGE_WALK_FACTOR: dict[str, float] = {
+    "18-25": 1.6,
+    "26-35": 1.4,
+    "36-45": 1.2,
+    "46-55": 1.0,
+    "55-70": 0.75,
+    "70+": 0.55,
+    "55+": 0.75,  # legacy
+}
 
 from app.constants import FEATURE_NAMES as _FEATURE_KEYS
 
@@ -380,21 +396,34 @@ def _get_duration(poi: Poi) -> int:
     return get_duration(poi, similarity_score=1.0)
 
 
+def is_landmark_poi(poi: Poi) -> bool:
+    """True if the POI is a globally-famous landmark (>= LANDMARK_THRESHOLD ratings)."""
+    return (poi.user_ratings_total or 0) >= LANDMARK_THRESHOLD
+
+
 def apply_novelty_penalty(
     score: float,
     poi_id: object,
     confirmed_visited_ids: set,
     previously_suggested_ids: set,
+    is_landmark: bool = False,
 ) -> float:
     """
     Applies novelty penalty to a combined/MMR score.
     - Confirmed visited → score × 0.0  (rank last; not hard-excluded so sparse cities still fill)
     - Previously suggested in last 12 months → score × 0.6
     - Never seen → no change
+
+    Landmarks (``is_landmark=True``) are exempt from the *implicit* previously-suggested
+    penalty: a globally-famous POI (Colosseum, Trevi…) should not be hidden just because
+    an earlier — possibly regenerated — itinerary already proposed it. The implicit signal
+    conflates "shown in a draft" with "already seen", which otherwise wipes every icon out
+    of a city after a few regenerations. The confirmed-visited penalty still applies (an
+    explicit "I went there" is a real signal, landmark or not).
     """
     if poi_id in confirmed_visited_ids:
         return score * CONFIRMED_VISITED_SCORE
-    if poi_id in previously_suggested_ids:
+    if poi_id in previously_suggested_ids and not is_landmark:
         return score * IMPLICIT_SUGGESTED_PENALTY
     return score
 
@@ -456,10 +485,34 @@ def resolve_activity_radius_m(
     return max(min_radius_m, min(adaptive_radius_m, max_radius_m))
 
 
-def select_transport(distance_m: float) -> tuple[str, float]:
-    if distance_m < 800:
+DEFAULT_WALK_THRESHOLD_M: float = 800.0  # base walking cut-off (personalization off)
+TAXI_THRESHOLD_M: float = 5000.0         # above this a leg always takes a taxi
+
+
+def compute_walk_threshold_m(age_range: str | None, relax: float | None) -> float:
+    """Personalized walking cut-off (metres) for select_transport().
+
+    Scales the base cut-off by the traveller's age cohort and relax preference:
+    a young/intense profile walks further, a senior/relax profile switches to a
+    vehicle sooner. Clamped to [min, max] so extreme profiles never degenerate.
+    When personalization is disabled the fixed base is returned for everyone
+    (the thesis A/B baseline). See settings.walk_* in app/config.py.
+    """
+    if not settings.walk_personalization:
+        return settings.walk_threshold_base_m
+    age_factor = _AGE_WALK_FACTOR.get((age_range or "").strip(), 1.0)
+    r = 0.0 if relax is None else max(0.0, min(1.0, float(relax)))
+    relax_factor = settings.walk_relax_base - settings.walk_relax_slope * r
+    raw = settings.walk_threshold_base_m * age_factor * relax_factor
+    return max(settings.walk_threshold_min_m, min(settings.walk_threshold_max_m, raw))
+
+
+def select_transport(
+    distance_m: float, walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M
+) -> tuple[str, float]:
+    if distance_m < walk_threshold_m:
         mode = "walking"
-    elif distance_m < 5000:
+    elif distance_m < TAXI_THRESHOLD_M:
         mode = "transit"
     else:
         mode = "taxi"
@@ -483,15 +536,17 @@ def _travel(
     dest_lat: float,
     dest_lng: float,
     travel_lookup: TravelLookup | None,
+    walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
 ) -> tuple[str, float]:
     """Return (transport_mode, minutes) for one leg.
 
-    The transport MODE is always chosen from the haversine distance (the existing
-    heuristic). The MINUTES come from the real travel-time cache when a hit exists,
-    otherwise from the haversine estimate. The fallback is never blocking.
+    The transport MODE is chosen from the haversine distance and the (possibly
+    personalized) walking cut-off. The MINUTES come from the real travel-time
+    cache when a hit exists, otherwise from the haversine estimate. The fallback
+    is never blocking.
     """
     dist = haversine_m(origin_lat, origin_lng, dest_lat, dest_lng)
-    mode, hav_min = select_transport(dist)
+    mode, hav_min = select_transport(dist, walk_threshold_m)
     if travel_lookup and origin_id is not None and dest_id is not None:
         hit = travel_lookup.get((origin_id, dest_id, _SCHED_TO_DB_MODE[mode]))
         if hit is not None:
@@ -499,14 +554,18 @@ def _travel(
     return mode, hav_min
 
 
-async def prefetch_travel_matrix(session, pois: list[Poi]) -> TravelLookup:
+async def prefetch_travel_matrix(
+    session, pois: list[Poi], walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M
+) -> TravelLookup:
     """Pre-populate the travel-time cache for all directed pairs among ``pois``.
 
     Returns a lookup keyed by (origin_id, dest_id, db_mode) → (minutes, meters).
-    The mode per pair is decided by select_transport() on the haversine distance,
-    matching how _travel() looks the leg up during scheduling. Only the mode each
-    pair actually needs is requested (halving the matrix elements). Failures fall
-    back to haversine inside routes_client — this call never raises on routing.
+    The mode per pair is decided by select_transport() on the haversine distance
+    and the same ``walk_threshold_m`` the scheduler uses — so the mode prefetched
+    matches the mode looked up later (otherwise the lookup misses and falls back
+    to haversine). Only the mode each pair needs is requested (halving the matrix
+    elements). Failures fall back to haversine inside routes_client — this call
+    never raises on routing.
     """
     from collections import defaultdict
 
@@ -517,7 +576,7 @@ async def prefetch_travel_matrix(session, pois: list[Poi]) -> TravelLookup:
         for b in pois:
             if a.id == b.id:
                 continue
-            mode, _ = select_transport(haversine_m(a.lat, a.lng, b.lat, b.lng))
+            mode, _ = select_transport(haversine_m(a.lat, a.lng, b.lat, b.lng), walk_threshold_m)
             by_mode[_SCHED_TO_DB_MODE[mode]].append((a, b))
 
     lookup: TravelLookup = {}
@@ -905,6 +964,57 @@ def _rebalance_clusters(clusters: dict[int, list[Poi]]) -> dict[int, list[Poi]]:
     return result
 
 
+def _prune_cluster_outliers(
+    clusters: dict[int, list[Poi]],
+    max_nn_m: float,
+    protect_min_ratings: int,
+    min_cluster_size: int = 4,
+) -> tuple[dict[int, list[Poi]], set]:
+    """Drop POIs geographically isolated within their own day-cluster.
+
+    Pre-clustering pins every POI to a day, but a stray POI far from its cluster
+    mates (e.g. Villa Doria Pamphili, ~2 km from the rest of its day) inflates that
+    day's travel without a nearby companion stop. Such a POI — whose nearest
+    same-cluster neighbour is farther than ``max_nn_m`` — is removed so the day stays
+    compact. Truly iconic POIs (``user_ratings_total >= protect_min_ratings``) are
+    always kept: skipping the Colosseum to save a few minutes is never worth it. Note
+    this protection threshold is deliberately far higher than ``LANDMARK_THRESHOLD``
+    (10k) — at 10k a far-flung 20k-review park would be spared, which is exactly the
+    case we want to prune; only the 100k+ must-sees should be untouchable. A cluster
+    is never shrunk below ``min_cluster_size``; the most isolated POIs are dropped
+    first.
+
+    Returns ``(pruned_clusters, dropped_ids)``. Distances use the original cluster
+    membership (one pass) — removing one far outlier does not normally strand another.
+    """
+    dropped: set = set()
+    result: dict[int, list[Poi]] = {}
+    for cid, pois in clusters.items():
+        if len(pois) <= min_cluster_size:
+            result[cid] = list(pois)
+            continue
+        scored = []
+        for p in pois:
+            nn = min(
+                (haversine_m(p.lat, p.lng, q.lat, q.lng) for q in pois if q is not p),
+                default=0.0,
+            )
+            scored.append((nn, p))
+        scored.sort(key=lambda x: x[0], reverse=True)  # most isolated first
+        kept = list(pois)
+        for nn, p in scored:
+            if nn <= max_nn_m:
+                break  # remaining POIs are within threshold
+            if (p.user_ratings_total or 0) >= protect_min_ratings:
+                continue
+            if len(kept) <= min_cluster_size:
+                break
+            kept.remove(p)
+            dropped.add(p.id)
+        result[cid] = kept
+    return result, dropped
+
+
 def _cluster_center(pois: list[Poi]) -> tuple[float, float]:
     """Geographic centroid of a list of POIs."""
     lats = [p.lat for p in pois]
@@ -991,7 +1101,7 @@ def _combined_score(
     proximity = 1.0 - min(dist / (proximity_km * 1000), 1.0)
     popularity = (popularity_scores or {}).get(poi.id, 0.5)
     score = 0.5 * sim + 0.3 * proximity + 0.2 * popularity
-    if (poi.user_ratings_total or 0) >= LANDMARK_THRESHOLD:
+    if is_landmark_poi(poi):
         score += LANDMARK_BOOST
     return min(score, 1.0)
 
@@ -1059,6 +1169,7 @@ def _mmr_select(
                 poi.id,
                 confirmed_visited_ids,
                 previously_suggested_ids,
+                is_landmark=is_landmark_poi(poi),
             ),
             _cosine_sim(_poi_vec(poi), uvec),
         )
@@ -1108,6 +1219,7 @@ def _schedule_day(
     popularity_scores: dict | None = None,
     travel_lookup: TravelLookup | None = None,
     max_food_price_level: int | None = None,
+    walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
 ) -> tuple[list[_Stop], list[tuple[Poi, float]]]:
     """
     Build the schedule for one day.
@@ -1220,7 +1332,8 @@ def _schedule_day(
         # Travel to this activity
         try:
             _, travel_min = _travel(
-                current_id, current_lat, current_lng, ap.id, ap.lat, ap.lng, travel_lookup
+                current_id, current_lat, current_lng, ap.id, ap.lat, ap.lng,
+                travel_lookup, walk_threshold_m,
             )
             arrival = current + timedelta(minutes=travel_min)
 
@@ -1304,7 +1417,8 @@ def _schedule_day(
             transport = None
         else:
             transport, travel_min = _travel(
-                cur_id, cur_lat, cur_lng, food_poi.id, food_poi.lat, food_poi.lng, travel_lookup
+                cur_id, cur_lat, cur_lng, food_poi.id, food_poi.lat, food_poi.lng,
+                travel_lookup, walk_threshold_m,
             )
         arrival = forced_arrival if forced_arrival is not None else cur + timedelta(minutes=travel_min)
         vm, vd, vn = resolve_visit_mode(food_poi, 1.0)
@@ -1331,7 +1445,8 @@ def _schedule_day(
             transport = None
         else:
             transport, travel_min = _travel(
-                cur_id, cur_lat, cur_lng, poi.id, poi.lat, poi.lng, travel_lookup
+                cur_id, cur_lat, cur_lng, poi.id, poi.lat, poi.lng,
+                travel_lookup, walk_threshold_m,
             )
         arrival = cur + timedelta(minutes=travel_min)
         vm, vd, vn = resolve_visit_mode(poi, sim_score)
@@ -1393,7 +1508,8 @@ def _schedule_day(
 
     if has_activities and lunch_poi and not lunch_inserted:
         _, travel_min = _travel(
-            cur_id, cur_lat, cur_lng, lunch_poi.id, lunch_poi.lat, lunch_poi.lng, travel_lookup
+            cur_id, cur_lat, cur_lng, lunch_poi.id, lunch_poi.lat, lunch_poi.lng,
+            travel_lookup, walk_threshold_m,
         )
         arrival = cur + timedelta(minutes=travel_min)
         if arrival + timedelta(minutes=get_food_duration(lunch_poi)) <= end_dt:
@@ -1404,7 +1520,8 @@ def _schedule_day(
 
     if has_activities and dinner_poi and not dinner_inserted:
         _, travel_min = _travel(
-            cur_id, cur_lat, cur_lng, dinner_poi.id, dinner_poi.lat, dinner_poi.lng, travel_lookup
+            cur_id, cur_lat, cur_lng, dinner_poi.id, dinner_poi.lat, dinner_poi.lng,
+            travel_lookup, walk_threshold_m,
         )
         arrival = cur + timedelta(minutes=travel_min)
         dinner_min_dt = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
@@ -1535,6 +1652,15 @@ async def generate(
     uvec = _user_vec(user_prefs)
     uvec = _apply_mode_bias(uvec, travel_mode)
     proximity_km = _proximity_km_for_profile(travel_with_children, age_range)
+    # Personalized walking cut-off (age + relax) shared by both solvers: it must
+    # be identical in prefetch and scheduling so the prefetched travel mode is the
+    # one looked up later (a mismatch silently falls back to haversine).
+    walk_threshold_m = compute_walk_threshold_m(age_range, getattr(user_prefs, "relax", None))
+    logger.info(
+        "Walk threshold: %.0f m (age_range=%s relax=%.2f personalization=%s)",
+        walk_threshold_m, age_range, float(getattr(user_prefs, "relax", 0.0) or 0.0),
+        settings.walk_personalization,
+    )
 
     # POIs classified as "food" always go to the food pool, even if Google types
     # don't include explicit food types (e.g. primary type "point_of_interest").
@@ -1622,6 +1748,7 @@ async def generate(
             confirmed_visited_ids=confirmed_visited_ids,
             previously_suggested_ids=previously_suggested_ids,
             max_food_price_level=max_food_price_level,
+            walk_threshold_m=walk_threshold_m,
             start_lat=start_lat,
             start_lng=start_lng,
             end_lat=end_lat,
@@ -1749,7 +1876,7 @@ async def generate(
         if session is not None and settings.routes_api_enabled:
             try:
                 travel_lookup = await prefetch_travel_matrix(
-                    session, [p for p, _ in candidates]
+                    session, [p for p, _ in candidates], walk_threshold_m
                 )
             except Exception as exc:  # routing must never block generation
                 logger.warning("Travel-matrix prefetch failed (%s) — using haversine", exc)
@@ -1768,6 +1895,7 @@ async def generate(
             popularity_scores,
             travel_lookup,
             max_food_price_level,
+            walk_threshold_m,
         )
 
         if deferred:

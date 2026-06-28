@@ -252,3 +252,30 @@ async def test_plan_respects_restricted_opening_hours(monkeypatch):
         for s in day:
             if s.poi is restricted:
                 assert 14 <= s.arrival.hour < 16
+
+
+def test_prune_cluster_outliers_drops_isolated_non_icon():
+    """An isolated non-icon POI is pruned; a far-but-iconic one is protected."""
+    from app.services.itinerary_planner import _prune_cluster_outliers
+
+    core = [_poi(f"core{i}", dlat=0.0002 * i, dlng=0.0002 * i, user_ratings_total=5_000) for i in range(5)]
+    outlier = _poi("Far park", dlat=0.02, dlng=0.02, user_ratings_total=20_000)        # ~3 km away
+    icon = _poi("Far must-see", dlat=-0.02, dlng=-0.02, user_ratings_total=300_000)     # ~3 km away
+
+    clusters = {0: [*core, outlier, icon]}
+    pruned, dropped = _prune_cluster_outliers(clusters, max_nn_m=1500, protect_min_ratings=100_000)
+
+    assert outlier.id in dropped          # isolated + not iconic → dropped
+    assert icon.id not in dropped         # isolated but iconic → kept
+    assert {p.id for p in pruned[0]} == {*(p.id for p in core), icon.id}
+
+
+def test_prune_cluster_outliers_respects_min_cluster_size():
+    """A cluster at/below min size is never shrunk, even with isolated members."""
+    from app.services.itinerary_planner import _prune_cluster_outliers
+
+    pois = [_poi("a"), _poi("Far b", dlat=0.03, dlng=0.03, user_ratings_total=500)]
+    pruned, dropped = _prune_cluster_outliers({0: pois}, max_nn_m=1500, protect_min_ratings=100_000)
+
+    assert dropped == set()
+    assert len(pruned[0]) == 2
