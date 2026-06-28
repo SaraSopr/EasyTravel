@@ -218,7 +218,11 @@ def _build_travel_seconds(
             if travel_lookup and a.poi_id is not None and b.poi_id is not None:
                 hit = travel_lookup.get((a.poi_id, b.poi_id, _SCHED_TO_DB_MODE[mode]))
                 if hit is not None:
-                    seconds = int(hit[0] * 60)
+                    minutes = hit[0]
+                    # Transit reuses the driving matrix → scale to approximate transit.
+                    if mode == "transit":
+                        minutes *= settings.transit_driving_factor
+                    seconds = int(minutes * 60)
             matrix[i][j] = seconds
     return matrix
 
@@ -419,7 +423,9 @@ def _reorder_day_tsptw(
     params.local_search_metaheuristic = (
         routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     )
-    params.time_limit.seconds = 3
+    # A single-day route is ~8–12 nodes; GLS converges in milliseconds, so 1 s is
+    # ample. (Three days at 3 s each added ~9 s to every request.)
+    params.time_limit.seconds = 1
     solution = routing.SolveWithParameters(params)
     if not solution:
         return ordered

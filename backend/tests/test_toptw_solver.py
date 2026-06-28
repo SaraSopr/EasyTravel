@@ -301,3 +301,21 @@ def test_prune_cluster_outliers_centroid_catches_subcluster_pair():
 
     assert far_a.id in dropped or far_b.id in dropped  # at least one of the pair pruned
     assert all(p.id not in dropped for p in core)       # core kept intact
+
+
+def test_transit_legs_use_driving_matrix_scaled():
+    """Transit legs reuse the driving matrix (ORS has no transit) and scale the
+    time by settings.transit_driving_factor."""
+    from app.config import settings
+    from app.services.itinerary_planner import _travel, select_transport, haversine_m
+
+    o = (41.9009, 12.4833)
+    d = (41.9169, 12.4820)  # ~1.78 km → select_transport picks "transit"
+    mode, _ = select_transport(haversine_m(*o, *d), 1250)
+    assert mode == "transit"
+
+    # only a "driving" cache entry exists (no "transit" key is ever written now)
+    lookup = {("A", "B", "driving"): (6.0, 1600)}
+    out_mode, minutes = _travel("A", o[0], o[1], "B", d[0], d[1], lookup, 1250)
+    assert out_mode == "transit"
+    assert minutes == 6.0 * settings.transit_driving_factor

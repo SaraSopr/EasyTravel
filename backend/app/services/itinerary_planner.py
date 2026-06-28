@@ -520,8 +520,10 @@ def select_transport(
     return mode, travel_minutes
 
 
-# scheduler mode → DB / Routes mode (taxi maps to road "driving")
-_SCHED_TO_DB_MODE: dict[str, str] = {"walking": "walking", "transit": "transit", "taxi": "driving"}
+# scheduler mode → DB / Routes mode. Both "transit" and "taxi" map to road "driving":
+# the routing provider (ORS) has no transit engine, so transit legs reuse real driving
+# geometry, scaled by settings.transit_driving_factor for time (see _travel).
+_SCHED_TO_DB_MODE: dict[str, str] = {"walking": "walking", "transit": "driving", "taxi": "driving"}
 
 # Type alias for the in-memory travel lookup resolved from the cache before scheduling.
 # Key: (origin_poi_id, dest_poi_id, db_mode) → (minutes, meters)
@@ -550,7 +552,11 @@ def _travel(
     if travel_lookup and origin_id is not None and dest_id is not None:
         hit = travel_lookup.get((origin_id, dest_id, _SCHED_TO_DB_MODE[mode]))
         if hit is not None:
-            return mode, hit[0]
+            minutes = hit[0]
+            # Transit reuses the driving matrix → scale up to approximate transit time.
+            if mode == "transit":
+                minutes *= settings.transit_driving_factor
+            return mode, minutes
     return mode, hav_min
 
 
@@ -1235,8 +1241,11 @@ def _schedule_day(
     2. Runs TSP on the selected activity stops (food anchors stay fixed).
     3. Re-propagates times after TSP reordering.
 
-    Returns (stops, deferred_candidates) where deferred_candidates are (Poi, score)
-    pairs skipped because the POI was closed at the planned arrival time.
+    Returns (stops, deferred_candidates, reserved_food_ids):
+    - deferred_candidates are (Poi, score) pairs skipped because the POI was
+      closed at the planned arrival time.
+    - reserved_food_ids are ids of food POIs pre-selected for a meal but never
+      inserted, reserved so they are not reused on the next day.
     """
     used_food: set = set()
     used_activity: set = set()

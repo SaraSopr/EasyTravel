@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     # Google Routes API (Compute Route Matrix). May reuse google_places_api_key if
     # Routes API is enabled on the same key. Only used when routing_provider="google".
     google_routes_api_key: str = ""
+    # ORS has no public-transit engine, so "transit" legs would fall back to straight-
+    # line haversine. Instead we route them as "driving" (real road geometry) and scale
+    # the time up by this factor to approximate transit (waiting + stops + walking to
+    # stops make transit slower than driving in a dense city). 1.0 = raw driving time.
+    transit_driving_factor: float = Field(
+        1.5,
+        validation_alias=AliasChoices("TRANSIT_DRIVING_FACTOR",),
+    )
     # ── Personalized walking threshold (transport-mode selection) ─────────
     # select_transport() picks "walking" below the cut-off, "transit"/"taxi"
     # above. Personalization scales the base cut-off by the traveller's age and
