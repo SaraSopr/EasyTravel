@@ -1,0 +1,15 @@
+You are arbitrating {{ items | length }} classification disagreement{% if items | length > 1 %}s{% endif %}. Handle each independently.
+
+{% for item in items %}
+[{{ loop.index }}] {{ item.name }}
+{% if item.address %}    Address: {{ item.address }}
+{% endif %}{% if item.types %}    Google types: {{ item.types | join(', ') }}
+{% endif %}    Classifier 1: {{ item.result1 | tojson }}
+    Classifier 2: {{ item.result2 | tojson }}
+{% if item.cat1 != item.cat2 %}
+    Disagreement: travel_category — Classifier 1 says "{{ item.cat1 }}", Classifier 2 says "{{ item.cat2 }}".
+{% else %}
+    Categories agree ({{ item.cat1 }}), but vectors or is_indoor_visitable differ.
+{% endif %}
+{% endfor %}
+Return exactly {{ items | length }} results in the same order as listed above.

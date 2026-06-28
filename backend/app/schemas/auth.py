@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.constants import AgeRange
 from app.schemas.user import UserOut
 
 
@@ -10,7 +11,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     home_city: str
-    age_range: str
+    age_range: AgeRange
     travel_with_children: bool = False
 
     @field_validator("email", mode="before")

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import uuid
 
 import httpx
@@ -10,21 +12,20 @@ from app.database import get_db
 from app.models.poi import Poi
 from app.services.storage import get_poi_public_url, poi_photo_cached_url, store_poi_photo
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/photos", tags=["photos"])
 
-# Photos resolved/cached at a single generous size; the client downscales as needed.
 _CACHE_WIDTH = 800
 _CACHE_CONTROL = "public, max-age=604800"
 
+# Deduplicates concurrent fetches for the same place_id.
+# While one coroutine is resolving+uploading, others wait on the event
+# and then read from R2 instead of hitting Google again.
+_inflight: dict[str, asyncio.Event] = {}
+
 
 async def _resolve_fresh_photo(place_id: str) -> bytes | None:
-    """Resolve a POI's current photo via Places API (New).
-
-    The ``photo_reference`` stored on older POIs is a legacy token the New API
-    rejects, so we look the place up fresh by ``google_place_id`` to get its
-    current photo resource name, then fetch the media bytes. Returns None when
-    the place has no photo.
-    """
     key = settings.google_places_api_key
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as http:
         details = await http.get(
@@ -71,17 +72,34 @@ async def get_poi_photo(
     if not settings.google_places_api_key:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Photos not configured")
 
-    try:
-        image_bytes = await _resolve_fresh_photo(place_id)
-    except httpx.HTTPError:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Photo fetch failed")
-
-    if image_bytes is None:
+    # If another request is already fetching this photo, wait for it and serve from cache.
+    if place_id in _inflight:
+        await _inflight[place_id].wait()
+        cached = await poi_photo_cached_url(place_id)
+        if cached:
+            return RedirectResponse(cached, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No photo for this place")
 
-    stored = await store_poi_photo(place_id, image_bytes)
-    if stored:
-        # Point the browser at the durable R2 copy for this and future loads.
-        return RedirectResponse(get_poi_public_url(place_id), status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    event = asyncio.Event()
+    _inflight[place_id] = event
+    try:
+        try:
+            image_bytes = await _resolve_fresh_photo(place_id)
+        except httpx.HTTPStatusError as exc:
+            logger.error("Google Places photo fetch failed: %s %s", exc.response.status_code, exc.response.text[:500])
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Photo fetch failed: {exc.response.status_code}")
+        except httpx.HTTPError as exc:
+            logger.error("Google Places photo fetch error: %s", exc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Photo fetch failed")
 
-    return Response(content=image_bytes, media_type="image/jpeg", headers={"Cache-Control": _CACHE_CONTROL})
+        if image_bytes is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No photo for this place")
+
+        stored = await store_poi_photo(place_id, image_bytes)
+        if stored:
+            return RedirectResponse(get_poi_public_url(place_id), status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+        return Response(content=image_bytes, media_type="image/jpeg", headers={"Cache-Control": _CACHE_CONTROL})
+    finally:
+        event.set()
+        _inflight.pop(place_id, None)

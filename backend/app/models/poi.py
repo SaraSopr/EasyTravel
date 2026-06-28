@@ -29,6 +29,9 @@ class Poi(Base):
     primary_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Short editorial description from Places API (New) `editorialSummary`; fed to the LLM stages.
     editorial_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Our own one-line tourist description (LLM-generated), kept separate from Google's
+    # editorial_summary for provenance. See evaluation/generate_descriptions.py.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     user_ratings_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price_level: Mapped[int | None] = mapped_column(Integer, nullable=True)

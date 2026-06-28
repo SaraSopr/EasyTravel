@@ -3,8 +3,9 @@
 For each generated itinerary, build A(included)–B(excluded) pairs in three flavours,
 designed to control the relevance-vs-feasibility confound:
 
-- ``substitutable``  : B excluded but in the SAME area as A (≤ radius) → logistics
-  controlled, the only difference is fit-to-profile. Tests selection/relevance.
+- ``substitutable``  : B excluded but in the SAME area as A (≤ radius) and of a
+  DIFFERENT category → logistics controlled, the only difference is fit-to-profile.
+  Tests selection/relevance.
 - ``famous_skipped`` : B = a famous (high-ratings) POI the trip skipped, vs an
   included POI of lesser fame. Tests must-see coverage.
 - ``margin``         : A = lowest-prize included, B = highest-prize excluded. Tests
@@ -72,18 +73,23 @@ def build_pairs_for_itinerary(itin: EvaluationItinerary, rng: random.Random) -> 
         return True
 
     # --- substitutable: A included, B excluded in the same area (≤ radius) ---
-    # Prefer lower-prize included A (more questionable inclusions).
+    # Prefer lower-prize included A (more questionable inclusions). B must be a
+    # DIFFERENT travel_category than A: two same-category neighbours (e.g. two
+    # adjacent monuments) carry no relevance contrast, so the comparison is noise.
+    # No contrasting neighbour in range → skip this A rather than pair near-twins.
     sub_count = 0
     for a in sorted(included, key=lambda c: c.get("prize", 0.0)):
         if sub_count >= cap:
             break
+        a_cat = (a.get("travel_category") or "").lower()
         near = [
             b for b in excluded
-            if haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) <= cfg.SUBSTITUTABLE_RADIUS_M
+            if (b.get("travel_category") or "").lower() != a_cat
+            and haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) <= cfg.SUBSTITUTABLE_RADIUS_M
         ]
         if not near:
             continue
-        # closest excluded neighbour → most comparable logistics
+        # closest contrasting neighbour → most comparable logistics
         b = min(near, key=lambda c: haversine_m(a["lat"], a["lng"], c["lat"], c["lng"]))
         if _add("substitutable", a, b):
             sub_count += 1

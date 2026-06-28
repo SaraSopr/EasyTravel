@@ -121,15 +121,46 @@ def _render_classify_batch(pois: list[Poi]) -> str:
     return _render("classify_batch.jinja2", pois=pois)
 
 
-def _render_arbitrate_prompt(poi: Poi, result1: dict, result2: dict) -> str:
-    return _render(
-        "arbitrate_poi.jinja2",
-        name=poi.name,
-        address=poi.address,
-        types=poi.types,
-        result1=result1,
-        result2=result2,
-    )
+def _render_arbitrate_batch(
+    pois: list[Poi],
+    r1_list: list[dict],
+    r2_list: list[dict],
+) -> str:
+    items = [
+        {
+            "name": poi.name,
+            "address": poi.address,
+            "types": poi.types,
+            "result1": r1,
+            "result2": r2,
+            "cat1": r1.get("travel_category", "unknown"),
+            "cat2": r2.get("travel_category", "unknown"),
+        }
+        for poi, r1, r2 in zip(pois, r1_list, r2_list)
+    ]
+    return _render("arbitrate_batch.jinja2", items=items)
+
+
+def _arbitrate_response_format() -> dict:
+    item = {
+        "type": "object",
+        "properties": {
+            "travel_category": {"type": "string", "enum": _CATEGORY_ENUM},
+            "feature_vector": {"type": "array", "items": {"type": "number"}},
+            "is_indoor_visitable": {"type": "boolean"},
+            "confidence": {"type": "string"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["travel_category", "feature_vector", "is_indoor_visitable", "confidence", "reasoning"],
+        "additionalProperties": False,
+    }
+    schema = {
+        "type": "object",
+        "properties": {"results": {"type": "array", "items": item}},
+        "required": ["results"],
+        "additionalProperties": False,
+    }
+    return {"type": "json_schema", "name": "poi_arbitration", "schema": schema, "strict": True}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -379,17 +410,24 @@ async def classify_batch(
             arb_r2.append(r2)
 
     if arb_indices:
-        arb_coros = [
-            _call_llm(
-                backend,
-                _render_arbitrate_system(),
-                _render_arbitrate_prompt(pois[i], r1, r2),
-                role="llm3_arbitrator",
-                poi_name=pois[i].name,
-            )
-            for i, r1, r2 in zip(arb_indices, arb_r1, arb_r2)
-        ]
-        arb_results = await asyncio.gather(*arb_coros)
+        arb_pois = [pois[i] for i in arb_indices]
+        arb_poi_names = [pois[i].name for i in arb_indices]
+        arb_fmt = (
+            _arbitrate_response_format()
+            if _settings.openai_structured_output and _settings.pipeline_llm_backend == "openai"
+            else None
+        )
+        logger.debug("  Arbitrating %d disagreements in one batch call", len(arb_indices))
+        arb_list = await _call_llm_batch(
+            backend,
+            _render_arbitrate_system(),
+            _render_arbitrate_batch(arb_pois, arb_r1, arb_r2),
+            len(arb_indices),
+            role="llm3_arbitrator_batch",
+            poi_names=arb_poi_names,
+            response_format=arb_fmt,
+        )
+        arb_results = arb_list or [None] * len(arb_indices)
 
         for idx, r3, r1 in zip(arb_indices, arb_results, arb_r1):
             r3 = r3 or r1

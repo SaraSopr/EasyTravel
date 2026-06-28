@@ -49,6 +49,12 @@ export const updateProfile = async (payload: {
   return data
 }
 
+// Canonical age buckets from the backend (single source of truth).
+export const getAgeRanges = async (): Promise<string[]> => {
+  const { data } = await client.get<{ age_ranges: string[] }>('/meta/age-ranges')
+  return data.age_ranges
+}
+
 export const changePassword = async (payload: {
   current_password: string
   new_password: string
@@ -140,4 +146,8 @@ export const replaceStop = async (
 
 export const removeStop = async (itineraryId: string, itemId: string): Promise<void> => {
   await client.delete(`/itineraries/${itineraryId}/items/${itemId}`)
+}
+
+export const deleteItinerary = async (itineraryId: string): Promise<void> => {
+  await client.delete(`/itineraries/${itineraryId}`)
 }

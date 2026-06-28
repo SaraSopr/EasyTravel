@@ -4,6 +4,7 @@ import client from './client'
 export interface ProfileContext {
   key: string
   label: string
+  description?: string
   travel_mode?: string
   age_range?: string
   children?: boolean
@@ -15,6 +16,7 @@ export interface PairOption {
   slot: 'a' | 'b'
   poi_id: string
   name: string
+  description?: string | null
   types?: string[] | null
   rating?: number | null
   user_ratings_total?: number | null

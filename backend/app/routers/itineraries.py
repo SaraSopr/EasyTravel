@@ -91,15 +91,21 @@ async def _geocode_location(query: str, city: str) -> tuple[float, float] | None
         return None
 
 
-async def _read_travel_time(db, origin, dest) -> tuple[str, float]:
+async def _read_travel_time(
+    db, origin, dest, walk_threshold_m: float = itinerary_planner.DEFAULT_WALK_THRESHOLD_M
+) -> tuple[str, float]:
     """Travel (transport, minutes) for a saved itinerary leg, cache-first.
 
-    Mode is chosen by the haversine heuristic; the duration comes from the real
-    travel-time cache when available, else haversine. Never calls the API on read.
+    Mode is chosen by the haversine heuristic and the same personalized walking
+    cut-off used at generation, so the displayed mode (and the mode-keyed cache
+    lookup) matches what was planned. The duration comes from the real travel-time
+    cache when available, else haversine. Never calls the API on read.
     """
     from app.services.routes_client import get_travel_time
 
-    mode, hav_min = select_transport(haversine_m(origin.lat, origin.lng, dest.lat, dest.lng))
+    mode, hav_min = select_transport(
+        haversine_m(origin.lat, origin.lng, dest.lat, dest.lng), walk_threshold_m
+    )
     minutes, _meters = await get_travel_time(
         db, origin, dest, itinerary_planner._SCHED_TO_DB_MODE[mode], allow_api=False
     )
@@ -338,6 +344,13 @@ async def get_itinerary(
     if itinerary is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found.")
 
+    # Personalized walking cut-off (age + relax), same as at generation, so the
+    # displayed transport mode and the mode-keyed cache lookup stay consistent.
+    user_prefs = await _load_user_prefs(db, current_user.id)
+    walk_threshold_m = itinerary_planner.compute_walk_threshold_m(
+        current_user.age_range, getattr(user_prefs, "relax", None)
+    )
+
     # Group items by day
     days_map: dict[int, list[ItineraryItem]] = {}
     for item in itinerary.items:
@@ -352,7 +365,7 @@ async def get_itinerary(
         for pos, item in enumerate(items, start=1):
             poi = item.place
             if prev_poi is not None:
-                transport, travel_min = await _read_travel_time(db, prev_poi, poi)
+                transport, travel_min = await _read_travel_time(db, prev_poi, poi, walk_threshold_m)
             else:
                 transport, travel_min = None, 0.0
 
@@ -622,6 +635,36 @@ async def replace_stop(
         poi_name=new_poi.name,
         visited_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
+
+
+@router.delete(
+    "/{itinerary_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_itinerary(
+    itinerary_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Itinerary).where(
+            Itinerary.id == itinerary_id,
+            Itinerary.user_id == current_user.id,
+        )
+    )
+    itinerary = result.scalar_one_or_none()
+    if itinerary is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found.")
+
+    items_result = await db.execute(
+        select(ItineraryItem).where(ItineraryItem.itinerary_id == itinerary_id)
+    )
+    for item in items_result.scalars().all():
+        await db.delete(item)
+
+    await db.delete(itinerary)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete(

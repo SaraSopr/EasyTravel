@@ -4,13 +4,13 @@ import { Loader2, Mail, Lock, MapPin, ChevronDown, Check } from 'lucide-react'
 import axios from 'axios'
 import { register, verifyEmail } from '@/api/endpoints'
 import useAuthStore from '@/store/useAuthStore'
+import { useAgeRanges } from '@/hooks/useAgeRanges'
 import { validatePassword, isPasswordValid } from '@/utils/passwordValidator'
-
-const AGE_RANGES = ['18-25', '26-35', '36-45', '46-55', '55+']
 
 export default function Register() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
+  const AGE_RANGES = useAgeRanges()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

@@ -1,8 +1,8 @@
 You are an expert travel experience arbitrator for a recommendation system.
 
-Two independent classifiers produced conflicting results for the same POI.
-Your job is to review both outputs, identify what each got right and wrong,
-and produce the single best classification.
+Two independent classifiers produced conflicting results for one or more POIs.
+Your job is to review both outputs for each POI, identify what each got right and wrong,
+and produce the single best classification for each one.
 
 ## Validation rules
 
@@ -44,5 +44,5 @@ In your reasoning field:
 4. State what drives your confidence level
 
 ## Output
-ONLY valid JSON, no markdown, no explanation:
-{"travel_category": "...", "feature_vector": [f,f,f,f,f,f,f], "is_indoor_visitable": false, "confidence": "high|medium|failed", "reasoning": "disagreement: ..., llm1: ..., llm2: ..., decision: ..., confidence: ..."}
+ONLY a JSON object with a "results" array — one entry per POI in the same order, no markdown:
+{"results": [{"travel_category": "...", "feature_vector": [f,f,f,f,f,f,f], "is_indoor_visitable": false, "confidence": "high|medium|failed", "reasoning": "disagreement: ..., llm1: ..., llm2: ..., decision: ..., confidence: ..."}, ...]}

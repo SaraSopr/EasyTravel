@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { MapPin, Map, ChevronRight, CheckCircle2 } from 'lucide-react'
-import { listItineraries } from '@/api/endpoints'
+import { Link, useNavigate } from 'react-router-dom'
+import { MapPin, Map, ChevronRight, CheckCircle2, Trash2, X } from 'lucide-react'
+import { listItineraries, deleteItinerary } from '@/api/endpoints'
 import type { ItinerarySummary } from '@/types'
 
 export default function Itineraries() {
   const [itineraries, setItineraries] = useState<ItinerarySummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
     let active = true
@@ -25,6 +28,22 @@ export default function Itineraries() {
       active = false
     }
   }, [])
+
+  const handleDelete = async () => {
+    if (!confirmDeleteId) return
+    setDeleting(true)
+    try {
+      await deleteItinerary(confirmDeleteId)
+      setItineraries((prev) => prev.filter((it) => it.itinerary_id !== confirmDeleteId))
+      setConfirmDeleteId(null)
+    } catch {
+      // keep dialog open so user can retry
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const confirmTarget = itineraries.find((it) => it.itinerary_id === confirmDeleteId)
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50 pb-28">
@@ -65,35 +84,86 @@ export default function Itineraries() {
         ) : (
           <div className="flex flex-col gap-3">
             {itineraries.map((it) => (
-              <Link
-                key={it.itinerary_id}
-                to={`/itinerary/${it.itinerary_id}`}
-                className="flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-4 shadow-sm active:scale-[0.99] transition-transform"
-              >
-                <div className="w-11 h-11 shrink-0 bg-indigo-50 rounded-xl flex items-center justify-center">
-                  <Map size={20} className="text-indigo-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-base font-bold text-gray-800 truncate">{it.city}</p>
-                  <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
-                    <span>
-                      {it.num_days} {it.num_days === 1 ? 'day' : 'days'} · {it.num_stops}{' '}
-                      {it.num_stops === 1 ? 'stop' : 'stops'}
-                    </span>
-                    {it.num_visited > 0 && (
-                      <span className="flex items-center gap-1 text-emerald-600 font-medium">
-                        <CheckCircle2 size={12} />
-                        {it.num_visited} visited
-                      </span>
-                    )}
+              <div key={it.itinerary_id} className="relative flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-4 shadow-sm">
+                <button
+                  onClick={() => navigate(`/itinerary/${it.itinerary_id}`)}
+                  className="flex items-center gap-3 flex-1 min-w-0 text-left active:scale-[0.99] transition-transform"
+                >
+                  <div className="w-11 h-11 shrink-0 bg-indigo-50 rounded-xl flex items-center justify-center">
+                    <Map size={20} className="text-indigo-500" />
                   </div>
-                </div>
-                <ChevronRight size={18} className="text-gray-300 shrink-0" />
-              </Link>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-base font-bold text-gray-800 truncate">{it.city}</p>
+                    <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
+                      <span>
+                        {it.num_days} {it.num_days === 1 ? 'day' : 'days'} · {it.num_stops}{' '}
+                        {it.num_stops === 1 ? 'stop' : 'stops'}
+                      </span>
+                      {it.num_visited > 0 && (
+                        <span className="flex items-center gap-1 text-emerald-600 font-medium">
+                          <CheckCircle2 size={12} />
+                          {it.num_visited} visited
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-gray-300 shrink-0" />
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteId(it.itinerary_id)}
+                  className="shrink-0 p-2 rounded-xl text-gray-300 hover:text-red-400 hover:bg-red-50 active:scale-95 transition-all"
+                  aria-label="Delete itinerary"
+                >
+                  <Trash2 size={17} />
+                </button>
+              </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Confirm delete dialog */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !deleting && setConfirmDeleteId(null)}
+          />
+          <div className="relative w-full max-w-md bg-white rounded-t-3xl px-6 pt-6 pb-10 shadow-xl">
+            <button
+              onClick={() => !deleting && setConfirmDeleteId(null)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+            >
+              <X size={20} />
+            </button>
+            <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-red-50 mb-4">
+              <Trash2 size={22} className="text-red-500" />
+            </div>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Delete itinerary?</h2>
+            <p className="text-sm text-gray-500 mb-6">
+              <span className="font-medium text-gray-700">{confirmTarget?.city}</span>
+              {' '}({confirmTarget?.num_days} {confirmTarget?.num_days === 1 ? 'day' : 'days'},{' '}
+              {confirmTarget?.num_stops} {confirmTarget?.num_stops === 1 ? 'stop' : 'stops'}) will be permanently deleted.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                disabled={deleting}
+                className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 active:scale-[0.98] transition-transform disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 py-3 rounded-xl bg-red-500 text-white text-sm font-semibold active:scale-[0.98] transition-transform disabled:opacity-50"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

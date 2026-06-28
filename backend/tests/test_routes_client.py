@@ -13,6 +13,17 @@ import pytest
 from app.services import routes_client
 
 
+@pytest.fixture(autouse=True)
+def _default_routing(monkeypatch):
+    """Default provider is "ors": give it a key so _routing_available() is True
+    in tests that enable routing. Google-payload tests override routing_provider.
+    Also reset the module-global circuit breaker / throttle so tests are isolated
+    and the inter-call throttle never sleeps during the suite."""
+    monkeypatch.setattr(routes_client.settings, "openrouteservice_api_key", "k", raising=False)
+    monkeypatch.setattr(routes_client, "_CIRCUIT_OPEN_UNTIL", 0.0, raising=False)
+    monkeypatch.setattr(routes_client, "_LAST_CALL_TS", 0.0, raising=False)
+
+
 def _poi(lat: float, lng: float):
     return SimpleNamespace(id=uuid.uuid4(), lat=lat, lng=lng)
 
@@ -92,6 +103,7 @@ async def test_compute_route_matrix_skips_non_existing_routes(monkeypatch):
          "distanceMeters": 0, "condition": "ROUTE_NOT_FOUND"},
     ]
     monkeypatch.setattr(routes_client.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(routes_client.settings, "routing_provider", "google", raising=False)
     monkeypatch.setattr(routes_client.settings, "google_routes_api_key", "k", raising=False)
 
     out = await routes_client.compute_route_matrix(
@@ -136,9 +148,62 @@ async def test_compute_route_matrix_no_route_returns_empty_list(monkeypatch):
          "distanceMeters": 0, "condition": "ROUTE_NOT_FOUND"},
     ]
     monkeypatch.setattr(routes_client.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(routes_client.settings, "routing_provider", "google", raising=False)
     monkeypatch.setattr(routes_client.settings, "google_routes_api_key", "k", raising=False)
     out = await routes_client.compute_route_matrix([(41.0, 12.0)], [(41.1, 12.1)], "walking")
     assert out == []
+
+
+# ── OpenRouteService provider (default) ──────────────────────────────
+
+class _FakeORSClient:
+    """Captures the posted body so we can assert the ORS request shape."""
+    payload: dict = {}
+    last_body: dict = {}
+    last_url: str = ""
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, url, json, headers):
+        _FakeORSClient.last_body = json
+        _FakeORSClient.last_url = url
+        return _FakeResponse(_FakeORSClient.payload)
+
+
+@pytest.mark.asyncio
+async def test_ors_matrix_parses_durations_and_skips_nulls(monkeypatch):
+    # 1 origin × 2 dests; second dest unreachable (null) → skipped.
+    _FakeORSClient.payload = {
+        "durations": [[300.0, None]],
+        "distances": [[500.0, None]],
+    }
+    monkeypatch.setattr(routes_client.httpx, "AsyncClient", _FakeORSClient)
+    monkeypatch.setattr(routes_client.settings, "routing_provider", "ors", raising=False)
+
+    out = await routes_client.compute_route_matrix(
+        [(41.0, 12.0)], [(41.1, 12.1), (41.2, 12.2)], "walking"
+    )
+    assert out == [(0, 0, 300, 500)]
+    # ORS uses foot-walking profile and [lng, lat] coordinate order.
+    assert _FakeORSClient.last_url.endswith("/foot-walking")
+    assert _FakeORSClient.last_body["locations"][0] == [12.0, 41.0]
+    assert _FakeORSClient.last_body["sources"] == [0]
+    assert _FakeORSClient.last_body["destinations"] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_ors_transit_mode_unsupported_returns_none(monkeypatch):
+    # ORS has no transit profile → request builder returns None → haversine.
+    monkeypatch.setattr(routes_client.settings, "routing_provider", "ors", raising=False)
+    out = await routes_client.compute_route_matrix([(41.0, 12.0)], [(41.1, 12.1)], "transit")
+    assert out is None
 
 
 @pytest.mark.asyncio

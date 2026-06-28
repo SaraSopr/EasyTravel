@@ -89,7 +89,7 @@ async def run_pipeline(
     text_search: bool = False,
 ) -> None:
     date_str = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-    logger = setup_logging(city_name, date_str)
+    logger = setup_logging(city_name, date_str, verbose=settings.pipeline_verbose)
     setup_llm_log(city_name, date_str)
     pipeline_run_id = str(uuid_module.uuid4())
     logger.info(f"=== Pipeline start: {city_name} (run_id={pipeline_run_id}) ===")
@@ -158,7 +158,7 @@ async def run_pipeline(
             return
 
         # Step 1: Fetch POIs
-        if not classify_only:
+        if not classify_only and not tourism_only:
             logger.info("Step 1: Fetching POIs from Google Places...")
             if not settings.google_places_api_key:
                 logger.error("GOOGLE_PLACES_API_KEY not set")
@@ -184,7 +184,7 @@ async def run_pipeline(
                 )
                 logger.info(f"  → {ts_count} new POIs from text search")
         else:
-            logger.info("Step 1: Skipped (--classify-only)")
+            logger.info("Step 1: Skipped (--classify-only / --tourism-only)")
             if text_search:
                 logger.info("Step 1b: Text search supplemental fetch...")
                 if not settings.google_places_api_key:

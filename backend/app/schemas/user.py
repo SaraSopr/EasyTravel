@@ -5,6 +5,8 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.constants import AgeRange
+
 
 class PreferenceVector(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -31,7 +33,7 @@ class UserOut(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     home_city: str | None = None
-    age_range: str | None = None
+    age_range: AgeRange | None = None
     travel_with_children: bool | None = None
 
 

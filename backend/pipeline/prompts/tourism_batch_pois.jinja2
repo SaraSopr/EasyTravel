@@ -1,0 +1,12 @@
+City: {{ city }}
+
+{% for poi in pois %}
+[{{ loop.index }}] {{ poi.name }}
+    Address: {{ poi.address or 'N/A' }}
+    Primary type: {{ poi.primary_type or 'N/A' }}
+    Google types: {{ poi.types | join(', ') if poi.types else 'N/A' }}
+    Rating: {{ poi.rating if poi.rating is not none else 'N/A' }} ({{ poi.user_ratings_total if poi.user_ratings_total is not none else 'N/A' }} reviews)
+{% if poi.editorial_summary %}    Description: {{ poi.editorial_summary }}
+{% endif %}
+{% endfor %}
+Return exactly {{ pois | length }} results in the same order as listed above.

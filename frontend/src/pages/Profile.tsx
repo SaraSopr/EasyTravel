@@ -4,6 +4,7 @@ import { LogOut, MapPin, Users, Calendar, Pencil, X, Check, Lock, Trash2, Loader
 import axios from 'axios'
 import { logoutApi, updateProfile, changePassword, deleteAccount, getPreferences } from '@/api/endpoints'
 import useAuthStore from '@/store/useAuthStore'
+import { useAgeRanges } from '@/hooks/useAgeRanges'
 import { validatePassword, isPasswordValid } from '@/utils/passwordValidator'
 import type { PreferenceVector } from '@/types'
 
@@ -17,8 +18,6 @@ const PREFERENCE_META: Record<keyof PreferenceVector, { label: string; emoji: st
   family_friendly: { label: 'Family',    emoji: '👨‍👩‍👧' },
 }
 
-const AGE_RANGES = ['18-25', '26-35', '36-45', '46-55', '55+']
-
 function getInitials(email: string) {
   return email.split('@')[0].slice(0, 2).toUpperCase()
 }
@@ -31,6 +30,7 @@ function getFirstName(email: string) {
 export default function Profile() {
   const navigate = useNavigate()
   const { user, setAuth, logout } = useAuthStore()
+  const AGE_RANGES = useAgeRanges()
 
   const [editing, setEditing] = useState(false)
   const [homeCity, setHomeCity] = useState(user?.home_city ?? '')
