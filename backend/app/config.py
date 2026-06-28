@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     # isolated from the zone core (e.g. San Paolo+Montemartini 892 m apart but
     # 2–3 km from the Roma-sud centroid). 0 = disabled.
     toptw_cluster_outlier_max_centroid_m: float = Field(
-        2500.0,
+        2000.0,
         validation_alias=AliasChoices("TOPTW_CLUSTER_OUTLIER_MAX_CENTROID_M",),
     )
     # Outlier pruning never drops a POI this famous (true must-sees). Deliberately far
