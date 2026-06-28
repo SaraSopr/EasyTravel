@@ -968,24 +968,25 @@ def _prune_cluster_outliers(
     clusters: dict[int, list[Poi]],
     max_nn_m: float,
     protect_min_ratings: int,
+    max_centroid_m: float = 0.0,
     min_cluster_size: int = 4,
 ) -> tuple[dict[int, list[Poi]], set]:
     """Drop POIs geographically isolated within their own day-cluster.
 
-    Pre-clustering pins every POI to a day, but a stray POI far from its cluster
-    mates (e.g. Villa Doria Pamphili, ~2 km from the rest of its day) inflates that
-    day's travel without a nearby companion stop. Such a POI — whose nearest
-    same-cluster neighbour is farther than ``max_nn_m`` — is removed so the day stays
-    compact. Truly iconic POIs (``user_ratings_total >= protect_min_ratings``) are
-    always kept: skipping the Colosseum to save a few minutes is never worth it. Note
-    this protection threshold is deliberately far higher than ``LANDMARK_THRESHOLD``
-    (10k) — at 10k a far-flung 20k-review park would be spared, which is exactly the
-    case we want to prune; only the 100k+ must-sees should be untouchable. A cluster
-    is never shrunk below ``min_cluster_size``; the most isolated POIs are dropped
-    first.
+    Two complementary criteria; a POI is an outlier if it fails either:
+    1. NN criterion: nearest same-cluster neighbour > ``max_nn_m``.
+    2. Centroid criterion (when ``max_centroid_m`` > 0): distance from the cluster
+       centroid > ``max_centroid_m``. Catches sub-cluster pairs that are mutually
+       close (beating the NN threshold) but together isolated from the zone core —
+       e.g. San Paolo fuori le Mura + Centrale Montemartini are 892 m apart (NN
+       passes at 1200 m) but both sit 2–3 km from the zone centroid, causing a
+       3 km down-and-back detour in the middle of the day.
 
-    Returns ``(pruned_clusters, dropped_ids)``. Distances use the original cluster
-    membership (one pass) — removing one far outlier does not normally strand another.
+    Truly iconic POIs (``user_ratings_total >= protect_min_ratings``) are never
+    dropped. A cluster is never shrunk below ``min_cluster_size``; the most
+    isolated POIs (by worst criterion) are dropped first.
+
+    Returns ``(pruned_clusters, dropped_ids)``.
     """
     dropped: set = set()
     result: dict[int, list[Poi]] = {}
@@ -993,18 +994,25 @@ def _prune_cluster_outliers(
         if len(pois) <= min_cluster_size:
             result[cid] = list(pois)
             continue
+        clat = sum(p.lat for p in pois) / len(pois)
+        clng = sum(p.lng for p in pois) / len(pois)
         scored = []
         for p in pois:
             nn = min(
                 (haversine_m(p.lat, p.lng, q.lat, q.lng) for q in pois if q is not p),
                 default=0.0,
             )
-            scored.append((nn, p))
+            cdist = haversine_m(p.lat, p.lng, clat, clng)
+            # isolation score: max of the two criteria (both in metres)
+            isolation = max(nn, cdist if max_centroid_m > 0 else 0.0)
+            scored.append((isolation, nn, cdist, p))
         scored.sort(key=lambda x: x[0], reverse=True)  # most isolated first
         kept = list(pois)
-        for nn, p in scored:
-            if nn <= max_nn_m:
-                break  # remaining POIs are within threshold
+        for isolation, nn, cdist, p in scored:
+            nn_outlier = nn > max_nn_m
+            centroid_outlier = max_centroid_m > 0 and cdist > max_centroid_m
+            if not nn_outlier and not centroid_outlier:
+                break
             if (p.user_ratings_total or 0) >= protect_min_ratings:
                 continue
             if len(kept) <= min_cluster_size:

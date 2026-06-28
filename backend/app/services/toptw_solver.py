@@ -658,6 +658,7 @@ async def plan(
                     cand_by_day,
                     settings.toptw_cluster_outlier_max_nn_m,
                     settings.toptw_outlier_protect_min_ratings,
+                    max_centroid_m=settings.toptw_cluster_outlier_max_centroid_m,
                 )
                 if dropped_ids:
                     candidates = [c for c in candidates if c[0].id not in dropped_ids]

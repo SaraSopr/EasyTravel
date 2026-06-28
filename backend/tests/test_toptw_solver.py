@@ -279,3 +279,25 @@ def test_prune_cluster_outliers_respects_min_cluster_size():
 
     assert dropped == set()
     assert len(pruned[0]) == 2
+
+
+def test_prune_cluster_outliers_centroid_catches_subcluster_pair():
+    """A pair of POIs mutually close (beating NN threshold) but both far from
+    the zone centroid should be pruned by the centroid criterion."""
+    from app.services.itinerary_planner import _prune_cluster_outliers
+
+    # Large dense core tightly clustered at the centre (12 POIs keep the centroid
+    # close to the core, not dragged south by the far pair).
+    core = [_poi(f"core{i}", dlat=0.001 * i, dlng=0.001 * i, user_ratings_total=5_000)
+            for i in range(12)]
+    # Southern sub-pair: ~580 m apart (passes NN@1200m) but ~2.8 km from centroid
+    far_a = _poi("Far south A", dlat=-0.025, dlng=0.000, user_ratings_total=18_000)
+    far_b = _poi("Far south B", dlat=-0.025, dlng=0.007, user_ratings_total=15_000)
+
+    clusters = {0: [*core, far_a, far_b]}
+    pruned, dropped = _prune_cluster_outliers(
+        clusters, max_nn_m=1200, protect_min_ratings=100_000, max_centroid_m=2500
+    )
+
+    assert far_a.id in dropped or far_b.id in dropped  # at least one of the pair pruned
+    assert all(p.id not in dropped for p in core)       # core kept intact

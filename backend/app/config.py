@@ -103,6 +103,14 @@ class Settings(BaseSettings):
         1500.0,
         validation_alias=AliasChoices("TOPTW_CLUSTER_OUTLIER_MAX_NN_M",),
     )
+    # Second pruning criterion: drop a candidate farther than this from its zone
+    # centroid. Catches sub-cluster pairs that beat the NN threshold but are both
+    # isolated from the zone core (e.g. San Paolo+Montemartini 892 m apart but
+    # 2–3 km from the Roma-sud centroid). 0 = disabled.
+    toptw_cluster_outlier_max_centroid_m: float = Field(
+        2500.0,
+        validation_alias=AliasChoices("TOPTW_CLUSTER_OUTLIER_MAX_CENTROID_M",),
+    )
     # Outlier pruning never drops a POI this famous (true must-sees). Deliberately far
     # above LANDMARK_THRESHOLD (10k) so a far-flung 20k-review park is still prunable.
     toptw_outlier_protect_min_ratings: int = 100_000
