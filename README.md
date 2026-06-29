@@ -30,15 +30,17 @@ EasyTravel/
 10. [LLM Classification](#llm-classification)
 11. [Tourism Validation](#tourism-validation)
 12. [Itinerary Planner](#itinerary-planner)
-13. [Evaluation Dashboard](#evaluation-dashboard)
-14. [Data Model Overview](#data-model-overview)
-15. [Feature Vector & Categories](#feature-vector--categories)
-16. [Security Notes](#security-notes)
+13. [TOPTW Solver](#toptw-solver)
+14. [Evaluation Dashboard](#evaluation-dashboard)
+15. [Evaluation Harness (Greedy vs TOPTW)](#evaluation-harness-greedy-vs-toptw)
+15. [Data Model Overview](#data-model-overview)
+16. [Feature Vector & Categories](#feature-vector--categories)
+17. [Security Notes](#security-notes)
 
 **Frontend**
-17. [Frontend Architecture](#frontend-architecture)
-18. [Pages & Routing](#pages--routing)
-19. [Trip Flow](#trip-flow)
+18. [Frontend Architecture](#frontend-architecture)
+19. [Pages & Routing](#pages--routing)
+20. [Trip Flow](#trip-flow)
 
 ---
 
@@ -676,6 +678,131 @@ The scheduler greedily builds each day from the MMR-selected candidates:
 
 ---
 
+## TOPTW Solver
+
+**File:** `app/services/toptw_solver.py` | **Activated by:** `itinerary_solver=toptw` (default)
+
+The TOPTW solver replaces the greedy pipeline with a single global optimisation over all days simultaneously. Where the greedy pipeline chains three local heuristics (cluster → MMR → schedule), each optimising a sub-objective, the TOPTW maximises total relevance subject to opening-hour windows, visit durations, real travel times, and a daily time budget — all at once.
+
+### Problem formulation
+
+The itinerary planning problem is modelled as a **Team Orienteering Problem with Time Windows (TOPTW)**:
+
+- Each **day** is a vehicle with its own time budget.
+- Each **POI** is an optional node with a prize (relevance score) and a time window derived from its opening hours on that weekday.
+- The solver selects which POIs to visit, assigns each to a day, and sequences them to **maximise total prize collected** subject to all constraints.
+- A POI can be visited **at most once** across all days.
+
+The TOPTW is NP-hard (it generalises TSP), so the implementation uses OR-Tools' routing solver with Guided Local Search rather than solving to optimality.
+
+### Prize computation
+
+Each POI's prize encodes its relevance to the user:
+
+```
+prize = w_sim · cosine(poi_vector, user_vector) + w_pop · popularity + landmark_boost
+```
+
+- `w_sim = 0.7`, `w_pop = 0.3` (configurable)
+- `popularity` = Bayesian average of rating × review count, normalised to [0,1]
+- `landmark_boost = +0.15` for POIs with > 10,000 reviews (ensures must-sees remain competitive)
+- A **novelty penalty** reduces the prize of previously visited or suggested POIs
+
+Only the top-N candidates by prize (`toptw_num_candidates = 80`) are passed to the solver to keep the model tractable.
+
+### OR-Tools mapping
+
+| TOPTW concept | OR-Tools construct |
+|---|---|
+| Day | vehicle |
+| POI visit on day k | replica node (POI, day k) |
+| Prize | disjunction penalty = ⌊prize × scale⌋ |
+| Visit at most once | disjunction (max cardinality 1) over replicas |
+| Opening hours window | `CumulVar` of Time dimension in [open, close] |
+| Wait until opening | Time dimension slack ≤ 4 h |
+| Daily budget | `CumulVar(End(k))` ≤ budget |
+| POI pinned to its day | `VehicleVar` ∈ {−1, k} |
+| Travel + service time | transit callback / arc cost |
+
+The solver **minimises** `arc_costs + sum(prizes of unvisited POIs)` — equivalent to maximising collected prize with travel time as a tiebreaker. The prize scale (`toptw_prize_scale = 100,000`) makes prize dominate over travel cost.
+
+Search: `PATH_CHEAPEST_ARC` initial solution + `GUIDED_LOCAL_SEARCH` metaheuristic, stopped by a wall-clock limit (`toptw_time_limit_s = 20 s`) or, for reproducible thesis runs, by a solution count limit (`toptw_solution_limit`).
+
+### Real travel times
+
+The solver uses **real road travel times** (OpenRouteService by default, Google Routes API as alternative) fetched in a single batch before solving and cached in the database. Each pair of POIs is resolved once; subsequent requests are cache hits.
+
+Transport mode per leg is chosen by distance with a personalised walking threshold (age + relax preference):
+
+| Distance | Mode |
+|---|---|
+| ≤ threshold (default 800 m) | Walking (ORS foot profile) |
+| threshold – 5 km | Transit (approximated as driving × 1.5) |
+| > 5 km | Taxi / driving |
+
+Transit uses the driving matrix scaled by `transit_driving_factor = 1.5` — a declared approximation (no GTFS engine available). Cache misses fall back to haversine estimates.
+
+### Geographic pre-clustering
+
+The unconstrained TOPTW is free to assign any POI to any day, which can produce geographically scattered days. An optional **pre-clustering** step pins each POI to one geographic zone (one per day) to keep days spatially compact.
+
+**Zone construction:** the full activity pool (not just the prize-filtered top-N) is clustered with the Leiden algorithm and rebalanced. Zones are ordered deterministically west→east by centroid longitude. Per-zone candidate selection (`ceil(N / num_days)` per zone) prevents a novelty-skewed global top-N from starving sparse zones.
+
+**Automatic gating:** pre-clustering is only applied when the zones are balanced. Balance is measured as:
+
+```
+balance = min(candidates per day) / mean(candidates per day)
+```
+
+- `toptw_pre_cluster_mode = auto` (default): pre-cluster only if `balance ≥ 0.35`; fall back to global TOPTW otherwise.
+- `on` / `off`: force the choice (thesis A/B arms).
+
+**Outlier pruning:** when pre-clustering is active, a POI too far from the rest of its zone is dropped if its nearest intra-zone neighbour exceeds `toptw_cluster_outlier_max_nn_m = 1500 m` **or** its distance from the zone centroid exceeds `toptw_cluster_outlier_max_centroid_m = 2000 m`. Landmark-class POIs are protected. Pruned POIs are removed entirely from candidates (not just un-pinned).
+
+### Selection–sequencing decomposition
+
+The multi-vehicle solver optimises POI selection and day assignment well but leaves each day's visiting order ~1.6× longer than a tight TSP. A second **single-vehicle TSPTW pass** re-sequences each day to minimise real travel time while respecting opening hours, without changing which POIs are on the day. This runs in milliseconds on a typical day (8–12 nodes) and is executed before meal insertion so meals are placed along the final compact route.
+
+### Meal insertion
+
+Meals are **not** solver nodes — they are inserted as a post-pass. The daily budget reserves `toptw_meal_reserve_min = 150 min` for meals (`budget = day_duration − 150 min`). After sequencing, times are propagated from the day start using real travel times; when the clock reaches the lunch or dinner window, the best open restaurant near the current route position is inserted (scored by proximity + rating, with a takeaway penalty). The food pool is shared across days.
+
+### Under-full day filling
+
+With pre-clustering active, a compact zone with short visits can exhaust its POIs by mid-afternoon while other days run full. When a day's used time falls below `toptw_underfull_fill_ratio × budget` (default 70%), the solver borrows extra unused POIs from the activity pool within `toptw_underfull_borrow_radius_m = 2000 m` of the day's centroid, pins them to that day, and re-solves. Already-full days keep their pins. Active by default; disable via env for thesis A/B baseline runs.
+
+### Approximations and limitations
+
+- **Transit times are approximated** as driving × 1.5. No real public-transport schedules are used.
+- **Split opening hours** (e.g. closed for lunch) are collapsed to `[min open, max close]` — a single OR-Tools time window. Availability during intermediate closure periods may be overestimated.
+- **GLS is not exact** — the solution is not guaranteed optimal within the time budget.
+- **Pre-clustering trades prize flexibility for spatial compactness.** The automatic gating limits the downside on degenerate splits.
+
+### Key hyperparameters
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `itinerary_solver` | `toptw` | Switch between `toptw` and `greedy` |
+| `toptw_num_candidates` | 80 | Top-N POIs fed to the solver |
+| `toptw_prize_scale` | 100,000 | Weight of prize vs. travel cost |
+| `toptw_time_limit_s` | 20 | Solver wall-clock budget (seconds) |
+| `toptw_solution_limit` | 0 | Stop after N improving solutions (0 = off; set > 0 for reproducible thesis runs) |
+| `toptw_meal_reserve_min` | 150 | Time reserved for meals (minutes) |
+| `toptw_w_sim` / `toptw_w_pop` | 0.7 / 0.3 | Prize weights (similarity / popularity) |
+| `toptw_pre_cluster_mode` | `auto` | `auto` / `on` / `off` — geographic pre-clustering |
+| `toptw_cluster_balance_min` | 0.35 | Balance threshold for auto gating |
+| `toptw_prune_outliers` | `true` | Drop isolated POIs from their zone |
+| `toptw_cluster_outlier_max_nn_m` | 1500 | Nearest-neighbour outlier threshold (m) |
+| `toptw_cluster_outlier_max_centroid_m` | 2000 | Centroid outlier threshold (m) |
+| `toptw_reorder_days` | `true` | Per-day TSPTW re-sequencing |
+| `toptw_fill_underfull_days` | `true` | Borrow POIs for sparse days |
+| `toptw_underfull_fill_ratio` | 0.7 | Under-full threshold (fraction of budget) |
+| `transit_driving_factor` | 1.5 | Transit time approximation multiplier |
+| `routes_api_enabled` | `false` | Enable real road times (vs haversine) |
+| `routing_provider` | `ors` | `ors` (OpenRouteService) or `google` |
+
+---
+
 ## Evaluation Dashboard
 
 **File:** `pipeline/dashboard.py` | **Requires:** `pip install -r requirements_dashboard.txt`
@@ -725,6 +852,134 @@ python pipeline/evaluation.py --city Roma
 
 Prints: agreement rate, cosine distance stats, confidence distribution, top disagreement pairs,
 per-category vector consistency, category distribution, tourism validation stats.
+
+---
+
+## Evaluation Harness (Greedy vs TOPTW)
+
+**Package:** `backend/evaluation/` | **Tables:** `evaluation_itineraries`, `evaluation_pairs`,
+`evaluation_ratings`, `evaluation_likert`
+
+The harness compares the two itinerary solvers — the greedy baseline
+(clustering → MMR → greedy scheduling) and the TOPTW solver (OR-Tools, real travel
+times) — for the thesis. It generates itineraries over a controlled test matrix,
+computes automatic metrics, and feeds a blind human-evaluation dashboard.
+
+### The 2×2 ablation
+
+The new system changed **two** things at once: the **algorithm** (greedy → TOPTW)
+*and* the **routing** (haversine estimate → real cached road times). Comparing only
+"old system vs new system" confounds the two. The harness therefore crosses both
+axes so each effect can be attributed independently:
+
+| | Routing `estimated` (haversine) | Routing `real` (cached road times) |
+|---|---|---|
+| **`greedy`** | A — baseline | B |
+| **`toptw`** | C | D — production |
+
+- **A → C** isolates the *algorithm* effect (same routing).
+- **A → B** isolates the *routing* effect (same algorithm).
+- A large gap between D and A+B (separately) indicates *synergy* (TOPTW exploits real
+  routing better than greedy does).
+
+The two axes map directly to existing settings, toggled per cell by the runner:
+`itinerary_solver` (`greedy`/`toptw`) and `routes_api_enabled` (`true`=real /
+`false`=haversine).
+
+### Test matrix
+
+Defined in `evaluation/config.py`:
+
+| Dimension | Values |
+|-----------|--------|
+| Cities | `Roma`, `Londra`, `Madrid`, `Porto` (3 dense capitals + 1 medium to stress POI scarcity) |
+| Durations | `2`, `4` days (must-see prioritisation vs completeness) |
+| Profiles | frozen user profiles in `evaluation/profiles.py` (vector + travel_mode + age_range) |
+| Solvers | `greedy`, `toptw` |
+| Routings | `real`, `estimated` |
+
+Each cell = `profile × city × num_days × solver × routing`. Generation is **idempotent
+per cell** (re-running replaces the row).
+
+### Running it
+
+```bash
+cd backend
+source .venv/bin/activate
+alembic upgrade head                      # ensure the routing column exists
+```
+
+#### Automatic evaluation (offline — no human needed)
+
+Run one city at a time to stay within the ORS free-tier rate limit (40 req/min, 500/day).
+The cache warms on the first `real`-routing run; subsequent cells reuse it.
+
+```bash
+python -m evaluation.run_eval --cities Roma
+python -m evaluation.run_eval --cities Madrid
+python -m evaluation.run_eval --cities Londra
+python -m evaluation.run_eval --cities Porto
+
+# Export one CSV row per cell — the thesis source table for RQ1 and RQ3
+python -m evaluation.export_metrics --out metrics_2x2.csv
+```
+
+If ORS returns 429 (rate limit), the runner falls back to haversine and logs a warning — it
+won't crash. Re-run the affected city after an hour.
+
+#### Other useful commands
+
+```bash
+# Scoped test run (one profile, one city, 2 days)
+python -m evaluation.run_eval --cities Roma --profiles couple_foodie --durations 2
+
+# Skip the ablation — real-routing arm only
+python -m evaluation.run_eval --routings real
+
+# Generate human-eval pairs (real arm only) — do this AFTER the automatic run
+python -m evaluation.run_eval --cities Roma Madrid Londra Porto --pairs --routings real
+```
+
+### Automatic metrics
+
+Computed per cell in `evaluation/metrics.py` and stored in `metrics_json`:
+
+| Metric | Axis | Thesis use |
+|--------|------|-----------|
+| `avg_relevance` | **selection quality** | **Primary RQ1 metric.** Mean prize per included POI — isolates *selection quality* independent of how many POIs were included. `total_relevance` confounds quality and quantity (a solver that crams more stops wins the total even if each stop is worse); the mean neutralises that bias. |
+| `total_relevance` | selection | Sum of included POI prizes — kept as reference, but read alongside `num_activities_included`. On its own it is biased toward solvers that include more stops. |
+| `num_activities_included` | selection | Number of activity POIs in the itinerary — the quantity dimension that `avg_relevance` deliberately ignores. Pair with `avg_relevance` to decompose total = quality × quantity. |
+| `landmark_coverage` | selection | Share of the city's top-N by popularity that made the trip. |
+| `intra_list_diversity` | selection | `1 − mean pairwise cosine` over included POIs (filter-bubble check). |
+| `real_overrun_day_rate` / `real_overrun_min_avg` | **feasibility** | Re-walks the planned route with the **real** travel cache (cache-first, no API) and reports how often / by how much a day no longer fits its budget. **Always measured against reality**, so an `estimated` plan is scored against real travel times — the feasibility oracle for RQ1b / RQ3. |
+| `stops_per_day`, `budget_fill_rate`, `idle_minutes_per_day`, `meals_complete_rate` | completeness | Day-shape sanity — quantifies how full the day is without conflating it with selection quality. |
+| `solve_time_ms` | cost | Solver wall-clock per cell. |
+
+### Human evaluation (blind)
+
+`run_eval --pairs` builds A(included)–B(excluded) POI pairs in three flavours
+(`substitutable`, `famous_skipped`, `margin`) that control the relevance-vs-logistics
+confound. Only the **real-routing** arm feeds the study — evaluators judge
+production-quality itineraries, not haversine-planned cells. Served by the
+`/api/evaluation` endpoints (blind: solver name stripped, options randomised):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/evaluation/pairs?evaluator=<id>` | Unrated pairs for an evaluator (blinded, shuffled) |
+| `POST` | `/evaluation/ratings` | Submit a pairwise choice (`a`/`b`/`equal`) |
+| `GET` | `/evaluation/itineraries?evaluator=<id>` | Whole itineraries for Likert rating (solver hidden) |
+| `POST` | `/evaluation/likert` | Submit Likert scores (realism, completeness, profile_fit, overall; 1–5) |
+| `GET` | `/evaluation/export` | CSV of all human ratings joined to pair + solver + profile |
+
+### Reproducibility
+
+- **Determinism:** set `TOPTW_SOLUTION_LIMIT > 0` (e.g. `50`) in `.env` for thesis runs.
+  With the default `0` the solver stops on wall-clock time, so the same input can yield
+  different itineraries across runs/machines (see `app/config.py`).
+- **Warm the routing cache:** the `real` arm and the `real_overrun` metric read the
+  travel cache with `allow_api=False`. Pre-populate it for the test cities, otherwise
+  legs silently fall back to haversine and the A/B/C/D cells collapse together.
+- `RANDOM_SEED` in `config.py` fixes the human-eval pair sampling.
 
 ---
 

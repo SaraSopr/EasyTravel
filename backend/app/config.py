@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     toptw_num_candidates: int = 80       # N: top-N activity candidates fed to the solver
     toptw_prize_scale: int = 100_000     # scales prize vs travel-seconds in the objective
     toptw_time_limit_s: int = 20         # solver wall-clock budget
+    # Reproducibility lever. GUIDED_LOCAL_SEARCH never terminates on its own, so the
+    # solver is stopped by a criterion. With the default wall-clock ``time_limit`` the
+    # number of moves explored before the cutoff depends on CPU/load, so the same input
+    # can yield different itineraries across runs/machines. Set this > 0 to stop after a
+    # fixed number of improving solutions instead — machine-independent, hence
+    # deterministic (``time_limit_s`` stays as a safety guard that should not bind for
+    # these instance sizes). 0 = disabled (production: latency-capped, best-effort).
+    toptw_solution_limit: int = 0
     toptw_meal_reserve_min: int = 150    # time reserved in the day budget for post-inserted meals
     toptw_w_sim: float = 0.7             # prize weight: cosine similarity
     toptw_w_pop: float = 0.3             # prize weight: popularity
@@ -143,6 +151,26 @@ class Settings(BaseSettings):
         True,
         validation_alias=AliasChoices("TOPTW_REORDER_DAYS", "ITINERARY_TOPTW_REORDER_DAYS"),
     )
+    # Fill under-filled days. With pre-clustering ON each POI is pinned to one day,
+    # so a sparse/short-visit zone (e.g. a compact city centre) can leave its day
+    # ending mid-afternoon while other days run full — the forced-18:00 dinner then
+    # leaves a dead gap. When enabled, a day whose scheduled time falls below
+    # ``underfull_fill_ratio * budget`` borrows extra candidates from the *unused*
+    # activity pool near that day's own centroid and re-solves. The extras are
+    # pinned to the under-full day only, so the already-full days stay compact.
+    # On by default (it fixes the dead-afternoon gap in real itineraries); force it
+    # off via the env alias for the thesis A/B (pre_cluster on/off) baseline runs.
+    toptw_fill_underfull_days: bool = Field(
+        True,
+        validation_alias=AliasChoices(
+            "TOPTW_FILL_UNDERFULL_DAYS", "ITINERARY_TOPTW_FILL_UNDERFULL_DAYS"
+        ),
+    )
+    toptw_underfull_fill_ratio: float = 0.7   # used-time < ratio*budget → under-full
+    toptw_underfull_extra_per_day: int = 8    # max extra candidates pulled per under-full day
+    # Borrowed extras must lie within this radius of the under-full day's centroid, so
+    # filling a sparse day never drags in a far POI that belongs to another zone.
+    toptw_underfull_borrow_radius_m: float = 2000.0
     cache_ttl_days: int = 30
     cloudflare_r2_access_key_id: str | None = None
     cloudflare_r2_secret_access_key: str | None = None

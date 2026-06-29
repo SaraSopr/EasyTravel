@@ -55,6 +55,11 @@ export const getAgeRanges = async (): Promise<string[]> => {
   return data.age_ranges
 }
 
+export const getCities = async (): Promise<string[]> => {
+  const { data } = await client.get<{ cities: string[] }>('/meta/cities')
+  return data.cities
+}
+
 export const changePassword = async (payload: {
   current_password: string
   new_password: string

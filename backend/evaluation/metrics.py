@@ -54,7 +54,13 @@ async def compute_metrics(
     included = [p for p in all_activity_candidates if p.id in included_activity_ids]
 
     # --- selection / relevance ---
+    # total_relevance confounds two things: how MANY POIs were included and how GOOD
+    # each one is. A greedy that crams more stops scores a higher total without picking
+    # better. avg_relevance (mean prize per included POI) isolates *selection quality*;
+    # the quantity dimension is carried separately by stops_per_day / budget_fill_rate.
+    # Report both: avg is the primary quality signal for RQ1, total stays for reference.
     total_relevance = float(sum(prize_by_id.get(p.id, 0.0) for p in included))
+    avg_relevance = (total_relevance / len(included)) if included else None
 
     top_landmarks = sorted(
         all_activity_candidates, key=lambda p: (p.user_ratings_total or 0), reverse=True
@@ -120,6 +126,8 @@ async def compute_metrics(
     n_days = len([d for d in all_days if d])
     return {
         "total_relevance": round(total_relevance, 4),
+        "avg_relevance": round(avg_relevance, 4) if avg_relevance is not None else None,
+        "num_activities_included": len(included),
         "landmark_coverage": round(landmark_coverage, 4) if landmark_coverage is not None else None,
         "intra_list_diversity": round(intra_list_diversity, 4) if intra_list_diversity is not None else None,
         "idle_minutes_per_day": round(sum(idle_per_day) / n_days, 1) if n_days else None,

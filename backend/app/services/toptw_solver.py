@@ -243,6 +243,7 @@ def _solve(
     time_limit_s: int,
     day_assignment: dict | None = None,
     walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
+    solution_limit: int = 0,
 ) -> list[list[tuple["Poi", float]]] | None:
     """Build and solve the TOPTW model. Returns per-day ordered ``[(poi, sim)]``.
 
@@ -342,6 +343,11 @@ def _solve(
         routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     )
     params.time_limit.seconds = max(1, time_limit_s)
+    # Deterministic mode: stop after a fixed number of improving solutions instead of
+    # relying solely on the wall-clock cutoff (see settings.toptw_solution_limit). The
+    # time limit above stays as a safety guard.
+    if solution_limit > 0:
+        params.solution_limit = solution_limit
 
     solution = routing.SolveWithParameters(params)
     if solution is None:
@@ -369,6 +375,7 @@ def _reorder_day_tsptw(
     day_start_min: int,
     day_total_s: int,
     day_date,
+    solution_limit: int = 0,
 ) -> list[tuple["Poi", float]]:
     """Re-sequence one day's already-selected activities to minimise real travel
     time, respecting opening-hour windows.
@@ -426,6 +433,10 @@ def _reorder_day_tsptw(
     # A single-day route is ~8–12 nodes; GLS converges in milliseconds, so 1 s is
     # ample. (Three days at 3 s each added ~9 s to every request.)
     params.time_limit.seconds = 1
+    # Deterministic mode (see settings.toptw_solution_limit): cap improving solutions
+    # so the result doesn't depend on how many moves fit in the wall-clock window.
+    if solution_limit > 0:
+        params.solution_limit = solution_limit
     solution = routing.SolveWithParameters(params)
     if not solution:
         return ordered
@@ -819,7 +830,7 @@ async def plan(
         candidates, num_days, day_start_min, day_total_s, budget_s, day_dates,
         s_lat, s_lng, e_lat, e_lng, travel_lookup,
         settings.toptw_prize_scale, settings.toptw_time_limit_s,
-        day_assignment, walk_threshold_m,
+        day_assignment, walk_threshold_m, settings.toptw_solution_limit,
     )
 
     if solver_days is None:
@@ -828,6 +839,96 @@ async def plan(
 
     included = sum(len(d) for d in solver_days)
     logger.info("TOPTW solved: %d activity stops assigned across %d days", included, num_days)
+
+    # --- Optional: fill under-filled days by borrowing nearby unused candidates ---
+    # With pinning ON each POI is locked to one day, so a sparse/short-visit zone
+    # (e.g. a compact city centre) can leave its day ending mid-afternoon while the
+    # other days run full — the forced-18:00 dinner then opens a dead gap. When a
+    # day's scheduled time falls below ``underfull_fill_ratio * budget``, pull extra
+    # candidates from the *unused* activity pool near that day's own centroid, pin
+    # them to that day, and re-solve. The full days keep their pins, so they stay
+    # compact; only the under-full day gains options.
+    if settings.toptw_fill_underfull_days and day_assignment is not None and solver_days:
+        def _route_used_s(ordered: list) -> int:
+            used = 0
+            prev_id, prev_lat, prev_lng = None, s_lat, s_lng
+            for poi, sim in ordered:
+                _, tmin = _travel(
+                    prev_id, prev_lat, prev_lng, poi.id, poi.lat, poi.lng,
+                    travel_lookup, walk_threshold_m,
+                )
+                _, visit_dur, _ = resolve_visit_mode(poi, sim)
+                used += int((tmin + visit_dur) * 60)
+                prev_id, prev_lat, prev_lng = poi.id, poi.lat, poi.lng
+            return used
+
+        used_ids = {c[0].id for c in candidates}
+        fill_floor = settings.toptw_underfull_fill_ratio * budget_s
+        extra_added = 0
+        for day_idx, ordered in enumerate(solver_days):
+            if not ordered:
+                continue  # a truly empty day has no anchor to borrow around
+            if _route_used_s(ordered) >= fill_floor:
+                continue  # day already well-filled
+            c_lat = sum(p.lat for p, _ in ordered) / len(ordered)
+            c_lng = sum(p.lng for p, _ in ordered) / len(ordered)
+            pool: list[tuple[float, float, float, "Poi"]] = []
+            for poi in activity_pois:
+                if (
+                    poi.id in used_ids
+                    or poi.id in confirmed_visited_ids
+                    or poi.id in previously_suggested_ids
+                ):
+                    continue
+                dist = haversine_m(c_lat, c_lng, poi.lat, poi.lng)
+                if dist > settings.toptw_underfull_borrow_radius_m:
+                    continue  # too far → belongs to another zone, not this day
+                prize, sim = compute_prize(
+                    poi, uvec, popularity_scores, settings.toptw_w_sim, settings.toptw_w_pop
+                )
+                prize = apply_novelty_penalty(
+                    prize, poi.id, confirmed_visited_ids, previously_suggested_ids,
+                    is_landmark=is_landmark_poi(poi),
+                )
+                pool.append((dist, prize, sim, poi))
+            if not pool:
+                continue
+            # Nearest first keeps the day compact; among the closest, prefer prize.
+            pool.sort(key=lambda t: t[0])
+            near = pool[: settings.toptw_underfull_extra_per_day * 3]
+            near.sort(key=lambda t: t[1], reverse=True)
+            for dist, prize, sim, poi in near[: settings.toptw_underfull_extra_per_day]:
+                candidates.append((poi, prize, sim))
+                day_assignment[poi.id] = day_idx
+                used_ids.add(poi.id)
+                extra_added += 1
+
+        if extra_added:
+            logger.info(
+                "TOPTW under-full fill: added %d extra candidate(s) → re-solving", extra_added
+            )
+            # Refresh the matrix so the new POIs' legs use real cached times, not haversine.
+            if session is not None and settings.routes_api_enabled:
+                try:
+                    travel_lookup = await prefetch_travel_matrix(
+                        session, [c[0] for c in candidates], walk_threshold_m
+                    )
+                except Exception as exc:
+                    logger.warning("TOPTW re-solve travel-matrix prefetch failed (%s)", exc)
+            resolved = await loop.run_in_executor(
+                None,
+                _solve,
+                candidates, num_days, day_start_min, day_total_s, budget_s, day_dates,
+                s_lat, s_lng, e_lat, e_lng, travel_lookup,
+                settings.toptw_prize_scale, settings.toptw_time_limit_s,
+                day_assignment, walk_threshold_m, settings.toptw_solution_limit,
+            )
+            if resolved is not None:
+                solver_days = resolved
+                logger.info(
+                    "TOPTW re-solved: %d activity stops across %d days",
+                    sum(len(d) for d in solver_days), num_days,
+                )
 
     # --- Per-day: meal post-insertion + time propagation (shared food pool) ---
     all_days: list[list[_Stop]] = []
@@ -847,7 +948,7 @@ async def plan(
         if settings.toptw_reorder_days:
             ordered = _reorder_day_tsptw(
                 ordered, travel_lookup, walk_threshold_m, s_lat, s_lng,
-                day_start_min, day_total_s, day_date,
+                day_start_min, day_total_s, day_date, settings.toptw_solution_limit,
             )
 
         available_food = [p for p in food_pois if p.id not in used_food_ids]

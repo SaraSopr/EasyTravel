@@ -1,6 +1,6 @@
 """Evaluation generation harness (see docs/evaluation-harness-spec.md §3).
 
-For every (profile × city × duration × solver) cell:
+For every (profile × city × duration × solver × routing) cell:
   1. build an in-memory UserPreference from the frozen profile (no DB user needed —
      the planner only reads the 7-dim vector + travel_mode + age_range),
   2. fetch the same candidate POIs production uses (`fetch_candidate_pois`),
@@ -10,9 +10,10 @@ For every (profile × city × duration × solver) cell:
      in `evaluation_itineraries` (idempotent per cell).
 
 Usage:
-    python -m evaluation.run_eval                 # full matrix
-    python -m evaluation.run_eval --pairs         # + build human-eval pairs
+    python -m evaluation.run_eval                 # full 2×2 matrix (both solvers × both routings)
+    python -m evaluation.run_eval --pairs         # + build human-eval pairs (real-routing arm only)
     python -m evaluation.run_eval --cities Roma --profiles couple_foodie --durations 2 --solvers toptw
+    python -m evaluation.run_eval --routings real # skip the ablation, real routing only
 """
 from __future__ import annotations
 
@@ -112,10 +113,16 @@ def _serialize_stop(stop, position: int) -> dict:
 
 async def _run_cell(
     db, run_id: uuid.UUID, profile: Profile, city: City, num_days: int, solver: str,
+    routing: str,
 ) -> bool:
     travel_mode = profile.travel_mode
     travel_with_children = profile.children
     start_str, end_str = _schedule_for_mode(TravelMode(travel_mode))
+
+    # Routing arm of the 2×2: flip the global switch the planners read so this cell
+    # plans on real road times ("real") or haversine ("estimated"). The harness is
+    # sequential, so mutating the singleton here is safe; run() restores it after.
+    settings.routes_api_enabled = (routing == "real")
 
     candidates = await fetch_candidate_pois(db, city.id, travel_with_children=travel_with_children)
     if len(candidates) < num_days * 3:
@@ -168,6 +175,7 @@ async def _run_cell(
         "city": city.name,
         "num_days": num_days,
         "solver": solver,
+        "routing": routing,
         "warnings": warnings,
         "days": [
             {
@@ -218,6 +226,7 @@ async def _run_cell(
             EvaluationItinerary.city == city.name,
             EvaluationItinerary.num_days == num_days,
             EvaluationItinerary.solver == solver,
+            EvaluationItinerary.routing == routing,
         )
     )
     db.add(EvaluationItinerary(
@@ -226,13 +235,14 @@ async def _run_cell(
         city=city.name,
         num_days=num_days,
         solver=solver,
+        routing=routing,
         payload_json=payload,
         candidates_json=candidates_json,
         metrics_json=cell_metrics,
     ))
     await db.commit()
-    logger.info("  ok %s/%s/%dd/%s — %d activity stops, relevance=%.2f, overrun_days=%.0f%%",
-                profile.key, city.name, num_days, solver,
+    logger.info("  ok %s/%s/%dd/%s/%s — %d activity stops, relevance=%.2f, overrun_days=%.0f%%",
+                profile.key, city.name, num_days, solver, routing,
                 len(included_ids), cell_metrics["total_relevance"],
                 100 * (cell_metrics["real_overrun_day_rate"] or 0))
     return True
@@ -244,24 +254,37 @@ async def run(args) -> None:
     cities = args.cities or cfg.CITIES
     durations = args.durations or cfg.DURATIONS
     solvers = args.solvers or cfg.SOLVERS
+    routings = args.routings or cfg.ROUTINGS
 
-    logger.info("Evaluation run_id=%s | %d profiles × %d cities × %d durations × %d solvers",
-                run_id, len(profiles), len(cities), len(durations), len(solvers))
+    logger.info(
+        "Evaluation run_id=%s | %d profiles × %d cities × %d durations × %d solvers × %d routings",
+        run_id, len(profiles), len(cities), len(durations), len(solvers), len(routings),
+    )
+
+    # _run_cell mutates settings.routes_api_enabled per cell; restore it afterwards
+    # so the harness leaves the process config untouched.
+    routes_api_enabled_orig = settings.routes_api_enabled
 
     ok = fail = 0
-    async with AsyncSessionLocal() as db:
-        for city_name in cities:
-            res = await db.execute(select(City).where(City.name.ilike(city_name)))
-            city = res.scalar_one_or_none()
-            if city is None:
-                logger.warning("City %r not found — run the pipeline first. Skipping.", city_name)
-                continue
-            for profile in profiles:
-                for num_days in durations:
-                    for solver in solvers:
-                        done = await _run_cell(db, run_id, profile, city, num_days, solver)
-                        ok += int(done)
-                        fail += int(not done)
+    try:
+        async with AsyncSessionLocal() as db:
+            for city_name in cities:
+                res = await db.execute(select(City).where(City.name.ilike(city_name)))
+                city = res.scalar_one_or_none()
+                if city is None:
+                    logger.warning("City %r not found — run the pipeline first. Skipping.", city_name)
+                    continue
+                for profile in profiles:
+                    for num_days in durations:
+                        for solver in solvers:
+                            for routing in routings:
+                                done = await _run_cell(
+                                    db, run_id, profile, city, num_days, solver, routing
+                                )
+                                ok += int(done)
+                                fail += int(not done)
+    finally:
+        settings.routes_api_enabled = routes_api_enabled_orig
 
     logger.info("Generation done: %d cells generated, %d skipped/failed.", ok, fail)
 
@@ -279,6 +302,8 @@ def main() -> None:
     ap.add_argument("--profiles", nargs="*", default=None, help="Profile keys (default: all)")
     ap.add_argument("--durations", nargs="*", type=int, default=None)
     ap.add_argument("--solvers", nargs="*", default=None, choices=["greedy", "toptw"])
+    ap.add_argument("--routings", nargs="*", default=None, choices=["real", "estimated"],
+                    help="Routing arm(s) of the 2×2 ablation (default: both)")
     ap.add_argument("--pairs", action="store_true", help="Also build human-eval pairs after generation")
     asyncio.run(run(ap.parse_args()))
 

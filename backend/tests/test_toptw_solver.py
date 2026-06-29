@@ -254,6 +254,63 @@ async def test_plan_respects_restricted_opening_hours(monkeypatch):
                 assert 14 <= s.arrival.hour < 16
 
 
+@pytest.mark.asyncio
+async def test_fill_underfull_day_borrows_nearby_candidates(monkeypatch):
+    """A sparse/short-visit zone leaves its day under-full under pinning. With the
+    fill flag on, that day borrows nearby unused POIs and ends up with more stops,
+    while the far zone is never polluted (borrow radius caps the reach)."""
+    monkeypatch.setattr(toptw_solver.settings, "routes_api_enabled", False, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_time_limit_s", 3, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_num_candidates", 6, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_pre_cluster_mode", "on", raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_prune_outliers", False, raising=False)
+
+    # West zone: many short-visit POIs. With n=6 / 2 days only the top-3 become
+    # candidates; the remaining 5 are the unused pool an under-full day can borrow.
+    west = [
+        _poi(f"W{i}", dlat=0.0005 * i, dlng=-0.03,
+             tourism_duration_minutes=20, user_ratings_total=1000 + i)
+        for i in range(8)
+    ]
+    # East zone: a few long-visit POIs that already fill their own day.
+    east = [
+        _poi(f"E{i}", dlat=0.0005 * i, dlng=0.03,
+             tourism_duration_minutes=120, user_ratings_total=5000)
+        for i in range(3)
+    ]
+    food = [_restaurant("Rw", dlng=-0.03), _restaurant("Re", dlng=0.03)]
+
+    async def _run():
+        return await toptw_solver.plan(
+            activity_pois=[*west, *east], food_pois=food, uvec=_uvec(),
+            popularity_scores={}, num_days=2,
+            start_time_str="09:00", end_time_str="20:00",
+            city_lat=_BASE_LAT, city_lng=_BASE_LNG,
+            confirmed_visited_ids=set(), previously_suggested_ids=set(), session=None,
+        )
+
+    def _west_activity_count(all_days):
+        best = 0
+        for day in all_days:
+            acts = [s for s in day if s.poi.travel_category != "food"]
+            if acts and sum(s.poi.lng for s in acts) / len(acts) < _BASE_LNG:
+                best = max(best, len(acts))
+        return best
+
+    monkeypatch.setattr(toptw_solver.settings, "toptw_fill_underfull_days", False, raising=False)
+    days_off, _ = await _run()
+
+    monkeypatch.setattr(toptw_solver.settings, "toptw_fill_underfull_days", True, raising=False)
+    days_on, _ = await _run()
+
+    # The under-full west day gains stops; the east day stays purely eastern.
+    assert _west_activity_count(days_on) > _west_activity_count(days_off)
+    for day in days_on:
+        acts = [s for s in day if s.poi.travel_category != "food"]
+        if acts and sum(s.poi.lng for s in acts) / len(acts) > _BASE_LNG:
+            assert all(s.poi.lng > _BASE_LNG for s in acts), "east day must stay eastern"
+
+
 def test_prune_cluster_outliers_drops_isolated_non_icon():
     """An isolated non-icon POI is pruned; a far-but-iconic one is protected."""
     from app.services.itinerary_planner import _prune_cluster_outliers

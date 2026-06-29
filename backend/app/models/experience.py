@@ -22,7 +22,7 @@ class CityExperience(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
-    # Perplexity fields
+    # LLM-generated fields (OpenAI gpt-5.4-mini with web search)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)

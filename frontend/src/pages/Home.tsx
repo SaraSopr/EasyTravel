@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Minus, Plus, Loader2, Search, Calendar } from 'lucide-react'
+import { Minus, Plus, Loader2, Search, Calendar, ChevronDown } from 'lucide-react'
 import axios from 'axios'
-import { generateItinerary } from '@/api/endpoints'
+import { generateItinerary, getCities } from '@/api/endpoints'
 import useAuthStore from '@/store/useAuthStore'
 import useTripStore from '@/store/useTripStore'
 
@@ -35,10 +35,15 @@ export default function Home() {
   const { setItinerary } = useTripStore()
 
   const [city, setCity] = useState('')
+  const [availableCities, setAvailableCities] = useState<string[]>([])
   const [numDays, setNumDays] = useState(1)
   const [travelMode, setTravelMode] = useState<'solo' | 'couple' | 'friends' | 'family'>('solo')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    getCities().then(setAvailableCities).catch(() => {})
+  }, [])
 
   const decrement = () => setNumDays((d) => Math.max(1, d - 1))
   const increment = () => setNumDays((d) => Math.min(14, d + 1))
@@ -86,16 +91,18 @@ export default function Home() {
               Destination
             </label>
             <div className="relative">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
+              <ChevronDown size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <select
                 id="destination"
-                type="text"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleFindPlaces()}
-                placeholder="e.g. Roma, Barcelona…"
-                className="w-full border border-gray-200/70 rounded-xl pl-10 pr-4 py-3 text-sm bg-white/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-400 focus:bg-white/85 transition-colors"
-              />
+                className="w-full appearance-none border border-gray-200/70 rounded-xl pl-4 pr-9 py-3 text-sm bg-white/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-400 focus:bg-white/85 transition-colors text-gray-700"
+              >
+                <option value="" disabled>Select a city…</option>
+                {availableCities.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
           </div>
 

@@ -25,6 +25,10 @@ class EvaluationItinerary(Base):
     city: Mapped[str] = mapped_column(String(100), nullable=False)
     num_days: Mapped[int] = mapped_column(Integer, nullable=False)
     solver: Mapped[str] = mapped_column(String(10), nullable=False)  # "greedy" | "toptw"
+    # Routing arm of the 2×2 ablation: "real" (cached road times) | "estimated"
+    # (haversine). Lets the harness isolate the algorithm change (greedy→toptw)
+    # from the routing change (estimated→real). Existing rows default to "real".
+    routing: Mapped[str] = mapped_column(String(10), nullable=False, default="real")
     payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)      # ItineraryOut-shaped snapshot
     candidates_json: Mapped[list] = mapped_column(JSONB, nullable=False)   # [{poi_id, name, prize, included, ...}]
     metrics_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

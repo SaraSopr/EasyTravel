@@ -10,7 +10,7 @@
 
 ## Architettura a due livelli
 
-1. **Metriche automatiche** → calcolate su **TUTTO** il test set (144 itinerari). Veloci, oggettive.
+1. **Metriche automatiche** → calcolate su **TUTTO** il test set (216 itinerari). Veloci, oggettive.
 2. **Valutazione umana** → su un **sottoinsieme campionato** di itinerari/coppie (il tempo umano è
    il collo di bottiglia). Dashboard dedicata, cieca e randomizzata.
 
@@ -33,23 +33,23 @@ planner normalizza e somma `_MODE_BIAS`.
 ```python
 PROFILES = [
   # key, label, travel_mode, age_range, travel_with_children, vector
-  {"key":"senior_solo_culture","label":"Anziano solo, culturale","travel_mode":"solo","age_range":"70-80","children":False,
+  {"key":"senior_solo_culture","label":"Anziano solo, culturale","travel_mode":"solo","age_range":"70+","children":False,
    "vector":{"nature":0.2,"culture":0.9,"food":0.5,"adventure":0.05,"nightlife":0.0,"relax":0.7,"family_friendly":0.1}},
-  {"key":"couple_foodie","label":"Coppia foodie-romantica","travel_mode":"couple","age_range":"30-40","children":False,
+  {"key":"couple_foodie","label":"Coppia foodie-romantica","travel_mode":"couple","age_range":"26-35","children":False,
    "vector":{"nature":0.3,"culture":0.6,"food":0.9,"adventure":0.2,"nightlife":0.3,"relax":0.7,"family_friendly":0.0}},
-  {"key":"young_solo_outdoor","label":"Giovane solo, outdoor/avventura","travel_mode":"solo","age_range":"20-30","children":False,
+  {"key":"young_solo_outdoor","label":"Giovane solo, outdoor/avventura","travel_mode":"solo","age_range":"18-25","children":False,
    "vector":{"nature":0.8,"culture":0.4,"food":0.5,"adventure":0.9,"nightlife":0.5,"relax":0.2,"family_friendly":0.0}},
-  {"key":"friends_nightlife","label":"Gruppo di amici, nightlife/social","travel_mode":"friends","age_range":"20-30","children":False,
+  {"key":"friends_nightlife","label":"Gruppo di amici, nightlife/social","travel_mode":"friends","age_range":"18-25","children":False,
    "vector":{"nature":0.2,"culture":0.3,"food":0.7,"adventure":0.7,"nightlife":0.9,"relax":0.2,"family_friendly":0.0}},
-  {"key":"family_toddlers","label":"Famiglia, bimbi piccoli","travel_mode":"family","age_range":"35-45","children":True,
+  {"key":"family_toddlers","label":"Famiglia, bimbi piccoli","travel_mode":"family","age_range":"36-45","children":True,
    "vector":{"nature":0.7,"culture":0.4,"food":0.5,"adventure":0.4,"nightlife":0.0,"relax":0.6,"family_friendly":1.0}},
-  {"key":"family_teen","label":"Famiglia, adolescente","travel_mode":"family","age_range":"40-50","children":True,
+  {"key":"family_teen","label":"Famiglia, adolescente","travel_mode":"family","age_range":"36-45","children":True,
    "vector":{"nature":0.5,"culture":0.6,"food":0.6,"adventure":0.7,"nightlife":0.1,"relax":0.3,"family_friendly":0.5}},
-  {"key":"couple_museums","label":"Coppia 'solo musei' (monotematico)","travel_mode":"couple","age_range":"50-60","children":False,
+  {"key":"couple_museums","label":"Coppia 'solo musei' (monotematico)","travel_mode":"couple","age_range":"46-55","children":False,
    "vector":{"nature":0.1,"culture":1.0,"food":0.4,"adventure":0.1,"nightlife":0.1,"relax":0.4,"family_friendly":0.0}},
-  {"key":"young_solo_relax","label":"Giovane solo, relax/benessere","travel_mode":"solo","age_range":"25-35","children":False,
+  {"key":"young_solo_relax","label":"Giovane solo, relax/benessere","travel_mode":"solo","age_range":"26-35","children":False,
    "vector":{"nature":0.6,"culture":0.3,"food":0.6,"adventure":0.2,"nightlife":0.2,"relax":0.9,"family_friendly":0.0}},
-  {"key":"couple_generalist","label":"Coppia generalista (turista medio)","travel_mode":"couple","age_range":"30-40","children":False,
+  {"key":"couple_generalist","label":"Coppia generalista (turista medio)","travel_mode":"couple","age_range":"26-35","children":False,
    "vector":{"nature":0.5,"culture":0.6,"food":0.6,"adventure":0.4,"nightlife":0.3,"relax":0.5,"family_friendly":0.0}},
 ]
 ```
@@ -64,14 +64,16 @@ Note:
 
 ## 2. Matrice di test
 
-- **Città** (4): `Roma`, `Londra`, `Madrid` + **1 città media** per stressare la scarsità di POI
-  (dove la differenza greedy vs TOPTW è massima). Default consigliato: **Bologna** (o Siviglia/Porto).
-  La 4ª città deve essere stata ingestita dalla pipeline (POI classificati + orari) come le altre.
+- **Città** (3): `Roma` e `Madrid` (capitali dense) + **`Porto`** come città media, per stressare
+  la scarsità di POI (dove la differenza greedy vs TOPTW è massima). Ogni città deve essere stata
+  ingestita dalla pipeline (POI classificati + orari).
 - **Durate** (2): `num_days = 2` (stress prioritizzazione must-see) e `num_days = 4` (stress
   completezza/varietà).
 - **Solver** (2): `greedy` (baseline), `toptw` (nuovo).
+- **Routing** (2): `real` (tempi reali su strada, cache) vs `estimated` (haversine). Incrociato con
+  i solver isola il cambio di algoritmo da quello di routing (ablazione 2×2).
 
-Totale: 9 × 4 × 2 × 2 = **144 itinerari** generati. Tutti passano per le metriche automatiche.
+Totale: 9 × 3 × 2 × 2 × 2 = **216 itinerari** generati. Tutti passano per le metriche automatiche.
 
 Config in `backend/evaluation/config.py`: liste `CITIES`, `DURATIONS`, `SOLVERS`, `depot=None`
 (centro città per tutti, per non introdurre una variabile in più nel confronto).

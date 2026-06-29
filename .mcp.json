@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "easytravel": {
+      "command": "/Users/sara/Uni/EasyTravel/.venv/bin/python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "/Users/sara/Uni/EasyTravel/backend"
+    }
+  }
+}

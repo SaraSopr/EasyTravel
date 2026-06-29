@@ -346,7 +346,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
                     }`}
                     style={active ? { backgroundColor: dayColor } : {}}
                   >
-                    Giorno {day.day_number}
+                    Day {day.day_number}
                   </button>
                 )
               })}

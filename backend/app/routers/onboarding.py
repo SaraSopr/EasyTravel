@@ -6,7 +6,6 @@ import logging
 import re
 import time
 import uuid
-from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 PLACES_SEMAPHORE = asyncio.Semaphore(5)
 
-# Per-city lock to prevent thundering-herd duplicate Perplexity calls
+# Per-city lock to prevent thundering-herd duplicate LLM calls
 _city_locks: dict[str, asyncio.Lock] = {}
 _city_locks_mutex = asyncio.Lock()
 
@@ -85,7 +84,7 @@ class ChoicesRequest(BaseModel):
 
 
 # ─────────────────────────────────────────────
-# Perplexity helper
+# LLM helper (OpenAI gpt-5.4-mini with web search)
 # ─────────────────────────────────────────────
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -305,7 +304,7 @@ async def get_experiences(
         logger.info("cache hit city=%s count=%d", city, len(cached))
         return cached
 
-    # 2. Per-city lock — prevents two simultaneous requests from both calling Perplexity
+    # 2. Per-city lock — prevents two simultaneous requests from both calling the LLM
     city_lock = await _get_city_lock(city)
     async with city_lock:
         # Re-check cache after acquiring lock (another request may have populated it)
@@ -320,9 +319,9 @@ async def get_experiences(
             logger.info("cache hit city=%s count=%d (after lock)", city, len(cached))
             return cached
 
-        logger.info("cache miss city=%s — calling Claude Sonnet with web search", city)
+        logger.info("cache miss city=%s — calling %s with web search", city, _EXPERIENCE_MODEL)
 
-        # 3. Fetch from Claude Sonnet with web search tool use
+        # 3. Fetch from the LLM with web search tool use
         raw_experiences = await fetch_experiences_with_web_search(city, max_results)
 
         # Build an in-request cache from historical data to avoid re-calling Google for known places.
@@ -331,50 +330,37 @@ async def get_experiences(
         # 4. Optionally enrich with Google Places (feature flag: GOOGLE_PLACES_ENABLED)
         logger.info("enriching %d experiences for city=%s", len(raw_experiences), city)
 
-        async def enrich(exp: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        async def enrich(exp: dict[str, Any]) -> dict[str, Any] | None:
             if settings.google_places_enabled and exp.get("verifiable") and exp.get("search_query"):
                 name_key = _normalize_place_name(exp.get("name"))
                 cached_place = local_place_cache.get(name_key)
                 if cached_place is not None:
                     logger.info("reusing cached place for experience '%s' in city=%s", exp.get("name"), city)
-                    return {**exp, **cached_place, "verified": True}, exp
+                    return {**exp, **cached_place, "verified": True}
 
                 places_data = await search_google_places(exp["search_query"], city)
                 if places_data is None:
                     logger.warning("discarding experience '%s' — not found on Google Places", exp.get("name"))
-                    return None, exp
+                    return None
 
                 if name_key:
                     local_place_cache[name_key] = places_data
-                return {**exp, **places_data, "verified": True}, exp
-            return exp, exp
+                return {**exp, **places_data, "verified": True}
+            return exp
 
-        pairs = await asyncio.gather(*[enrich(e) for e in raw_experiences])
-        enriched = [r for r, _ in pairs if r is not None]
-        discarded = [orig for r, orig in pairs if r is None]
+        results = await asyncio.gather(*[enrich(e) for e in raw_experiences])
+        enriched = [r for r in results if r is not None]
 
-        # Group discards by slot and fetch replacements from Perplexity
-        if discarded:
-            discards_by_slot: dict[str, list[str]] = defaultdict(list)
-            for exp in discarded:
-                slot = exp.get("slot")
-                if slot:
-                    discards_by_slot[slot].append(exp.get("name", ""))
-
-            async def fetch_and_enrich_replacements(slot: str, exclude_names: list[str]) -> list[dict[str, Any]]:
-                count = min(len(exclude_names) + 1, 3)
-                candidates = await fetch_replacements_from_perplexity(city, slot, exclude_names, count)
-                replacement_pairs = await asyncio.gather(*[enrich(c) for c in candidates])
-                accepted = [r for r, _ in replacement_pairs if r is not None]
-                logger.info("replacements for slot=%s: %d/%d accepted", slot, len(accepted), len(candidates))
-                return accepted
-
-            replacement_results = await asyncio.gather(*[
-                fetch_and_enrich_replacements(slot, names)
-                for slot, names in discards_by_slot.items()
-            ])
-            for replacements in replacement_results:
-                enriched.extend(replacements)
+        # A verifiable experience not found on Google Places is dropped, and we
+        # serve fewer than max_results rather than backfilling. (Slot-based
+        # replacement fetching was removed as unfinished/dead code — see
+        # docs/onboarding.md, "Discard policy".)
+        discarded_count = len(results) - len(enriched)
+        if discarded_count:
+            logger.info(
+                "city=%s — %d experience(s) discarded (not on Google Places); serving %d",
+                city, discarded_count, len(enriched),
+            )
 
         # 5. Soft-delete old experiences and insert new ones
         logger.info("saving %d experiences for city=%s", len(enriched), city)

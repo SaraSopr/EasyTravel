@@ -129,10 +129,18 @@ def build_pairs_for_itinerary(itin: EvaluationItinerary, rng: random.Random) -> 
 
 
 async def build_pairs_for_run(db, run_id: uuid.UUID) -> int:
-    """(Re)build pairs for every itinerary of a run. Idempotent per itinerary."""
+    """(Re)build pairs for every itinerary of a run. Idempotent per itinerary.
+
+    Only the real-routing arm of the 2×2 feeds the human study: evaluators judge
+    the production-quality itineraries, not the haversine-planned "estimated" cells
+    that exist purely for the offline ablation.
+    """
     rng = random.Random(cfg.RANDOM_SEED)
     res = await db.execute(
-        select(EvaluationItinerary).where(EvaluationItinerary.run_id == run_id)
+        select(EvaluationItinerary).where(
+            EvaluationItinerary.run_id == run_id,
+            EvaluationItinerary.routing == "real",
+        )
     )
     itineraries = list(res.scalars().all())
 
