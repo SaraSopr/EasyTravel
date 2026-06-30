@@ -55,9 +55,29 @@ export const getAgeRanges = async (): Promise<string[]> => {
   return data.age_ranges
 }
 
-export const getCities = async (): Promise<string[]> => {
-  const { data } = await client.get<{ cities: string[] }>('/meta/cities')
-  return data.cities
+// The city list is effectively static, so cache it for the session. The first
+// caller (or `prefetchCities` at app startup) triggers the request; everyone
+// else reuses the same in-flight/resolved promise. A failed request clears the
+// cache so the next call can retry.
+let citiesCache: Promise<string[]> | null = null
+
+export const getCities = (): Promise<string[]> => {
+  if (!citiesCache) {
+    citiesCache = client
+      .get<{ cities: string[] }>('/meta/cities')
+      .then((res) => res.data.cities)
+      .catch((err) => {
+        citiesCache = null
+        throw err
+      })
+  }
+  return citiesCache
+}
+
+// Warm the cache ahead of time (e.g. at app startup) so the Home form's city
+// dropdown is already populated by the time the user gets there.
+export const prefetchCities = (): void => {
+  void getCities().catch(() => {})
 }
 
 export const changePassword = async (payload: {

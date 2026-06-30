@@ -4,6 +4,7 @@ import { Loader2, Wand2, MapPin, Calendar } from 'lucide-react'
 import { generateItinerary } from '@/api/endpoints'
 import useTripStore from '@/store/useTripStore'
 import PlaceCard from '@/components/PlaceCard'
+import { prefetchItineraryPhotos } from '@/utils/photos'
 
 export default function Recommendations() {
   const navigate = useNavigate()
@@ -18,6 +19,7 @@ export default function Recommendations() {
     setLoading(true)
     try {
       const itinerary = await generateItinerary({ city, num_days: numDays })
+      prefetchItineraryPhotos(itinerary)
       setItinerary(itinerary)
       navigate(`/itinerary/${itinerary.itinerary_id}`)
     } catch {
@@ -28,7 +30,7 @@ export default function Recommendations() {
   }
 
   return (
-    <div className="relative max-w-md mx-auto min-h-screen flex flex-col bg-gray-50 pb-36">
+    <div className="relative max-w-md mx-auto min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-gray-50 to-gray-50 pb-36">
       {loading && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-gray-50/85 backdrop-blur-sm">
           <div className="gradient-ring w-16 h-16 animate-spin" />
@@ -37,7 +39,7 @@ export default function Recommendations() {
       )}
 
       {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-600 to-violet-600 px-6 pt-14 pb-16">
+      <div className="bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-500 px-6 pt-14 pb-16">
         <h1 className="text-2xl font-extrabold text-white tracking-tight">{city}</h1>
         <div className="flex items-center gap-3 mt-2">
           <span className="flex items-center gap-1.5 text-indigo-200 text-sm font-medium">
@@ -58,7 +60,7 @@ export default function Recommendations() {
         </p>
 
         {error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-4">
+          <div className="text-sm text-red-600 bg-red-50/85 backdrop-blur border border-red-100/80 rounded-xl px-4 py-3 mb-4">
             {error}
           </div>
         )}
@@ -83,7 +85,7 @@ export default function Recommendations() {
       </div>
 
       {/* Sticky bottom */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white/85 backdrop-blur-md border-t border-gray-100 px-6 py-4">
+      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 z-30 w-full max-w-md glass glass-specular rounded-t-3xl px-6 py-4">
         {selectedPlaceIds.length > 0 && (
           <p className="text-xs text-center text-gray-400 font-medium mb-2">
             {selectedPlaceIds.length} place{selectedPlaceIds.length !== 1 ? 's' : ''} selected

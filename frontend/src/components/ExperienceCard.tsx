@@ -18,16 +18,16 @@ export default function ExperienceCard({ experience, selected, onOpen }: Experie
   return (
     <button
       onClick={onOpen}
-      className={`relative flex flex-col items-start gap-2.5 p-4 rounded-2xl border-2 text-left w-full transition-all active:scale-[0.97] ${
+      className={`glass glass-specular relative flex flex-col items-start gap-2.5 p-4 rounded-2xl border-2 text-left w-full transition-all active:scale-[0.97] ${
         selected
-          ? 'border-indigo-400 bg-gradient-to-br from-indigo-50 to-violet-50 shadow-md shadow-indigo-100'
-          : 'border-gray-100 bg-white shadow-sm'
+          ? 'border-indigo-400 bg-gradient-to-br from-indigo-50/90 to-violet-50/90 shadow-md shadow-indigo-100'
+          : 'border-white/60'
       }`}
     >
       {selected && (
         <CheckCircle2 size={16} className="absolute top-3 right-3 text-indigo-500" />
       )}
-      <div className={`p-2 rounded-xl ${selected ? 'bg-indigo-100' : 'bg-gray-100'}`}>
+      <div className={`p-2 rounded-xl border border-white/60 ${selected ? 'bg-indigo-100/80' : 'bg-white/55'}`}>
         <IconComponent
           size={22}
           className={selected ? 'text-indigo-600' : 'text-gray-500'}

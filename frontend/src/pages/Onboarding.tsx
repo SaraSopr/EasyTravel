@@ -51,9 +51,9 @@ export default function Onboarding() {
   }
 
   return (
-    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50 pb-28">
+    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-gray-50 to-gray-50 pb-28">
       {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-600 to-violet-600 px-6 pt-14 pb-16">
+      <div className="bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-500 px-6 pt-14 pb-16">
         <p className="text-indigo-200 text-sm font-medium mb-2">Personalise your experience</p>
         <h1 className="text-2xl font-extrabold text-white tracking-tight leading-snug">
           What kind of traveller are you?
@@ -65,7 +65,7 @@ export default function Onboarding() {
 
       <div className="flex-1 bg-gray-50 rounded-t-3xl -mt-6 px-6 pt-6">
         {error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-4">
+          <div className="text-sm text-red-600 bg-red-50/85 backdrop-blur border border-red-100/80 rounded-xl px-4 py-3 mb-4">
             {error}
           </div>
         )}
@@ -116,7 +116,7 @@ export default function Onboarding() {
       />
 
       {/* Sticky bottom */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white/85 backdrop-blur-md border-t border-gray-100 px-6 py-4">
+      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 z-30 w-full max-w-md glass glass-specular rounded-t-3xl px-6 py-4">
         <div className="flex items-center justify-between mb-3">
           <span className="text-xs text-gray-400 font-medium">
             {selectedIds.length === 0

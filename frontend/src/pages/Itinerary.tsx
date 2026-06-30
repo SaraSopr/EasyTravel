@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom'
 import { MapPin } from 'lucide-react'
 import { getItinerary } from '@/api/endpoints'
 import ItineraryExplorer from '@/components/ItineraryExplorer'
+import { prefetchItineraryPhotos } from '@/utils/photos'
+import { visibleWarnings } from '@/utils/warnings'
 import type { Itinerary as ItineraryType } from '@/types'
 
 export default function Itinerary() {
@@ -16,6 +18,7 @@ export default function Itinerary() {
     if (!id) return
     try {
       const data = await getItinerary(id)
+      prefetchItineraryPhotos(data)
       setItinerary(data)
     } catch {
       setError('Failed to load itinerary.')
@@ -71,9 +74,9 @@ export default function Itinerary() {
           </div>
         ) : (
           <div className="flex flex-col gap-5">
-            {!!itinerary.warnings?.length && (
+            {!!visibleWarnings(itinerary.warnings).length && (
               <div className="flex flex-col gap-2">
-                {itinerary.warnings.map((w, i) => (
+                {visibleWarnings(itinerary.warnings).map((w, i) => (
                   <div key={i} className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
                     <span className="text-amber-500 mt-0.5 shrink-0">⚠️</span>
                     <p className="text-xs text-amber-700">{w}</p>

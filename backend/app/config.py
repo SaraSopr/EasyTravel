@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     )
     # Fill under-filled days. With pre-clustering ON each POI is pinned to one day,
     # so a sparse/short-visit zone (e.g. a compact city centre) can leave its day
-    # ending mid-afternoon while other days run full — the forced-18:00 dinner then
+    # ending mid-afternoon while other days run full — the forced-19:00 dinner then
     # leaves a dead gap. When enabled, a day whose scheduled time falls below
     # ``underfull_fill_ratio * budget`` borrows extra candidates from the *unused*
     # activity pool near that day's own centroid and re-solves. The extras are

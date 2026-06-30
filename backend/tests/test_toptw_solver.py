@@ -378,6 +378,37 @@ def test_transit_legs_use_driving_matrix_scaled():
     assert minutes == 6.0 * settings.transit_driving_factor
 
 
+def test_reorder_day_never_worse_than_input():
+    """The per-day re-sequencer is seeded with the incoming order, so it can only
+    tighten it — never return a route longer than what it was given (regression:
+    the un-seeded solver could converge to a worse local optimum)."""
+    from app.services.itinerary_planner import haversine_m
+
+    # Four POIs strung roughly west→east; hand the solver a zig-zag input order.
+    a = _poi("A", dlng=0.000)
+    b = _poi("B", dlng=0.004)
+    c = _poi("C", dlng=0.008)
+    d = _poi("D", dlng=0.012)
+    zigzag = [(a, 1.0), (c, 1.0), (b, 1.0), (d, 1.0)]
+
+    s_lat, s_lng = _BASE_LAT, _BASE_LNG  # depot at A
+
+    def path_len(seq):
+        tot, plat, plng = 0.0, s_lat, s_lng
+        for poi, _ in seq:
+            tot += haversine_m(plat, plng, poi.lat, poi.lng)
+            plat, plng = poi.lat, poi.lng
+        return tot
+
+    out = toptw_solver._reorder_day_tsptw(
+        zigzag, None, 1250.0, s_lat, s_lng,
+        day_start_min=540, day_total_s=10 * 3600, day_date=datetime(2025, 6, 2),
+    )
+
+    assert {p.id for p, _ in out} == {p.id for p, _ in zigzag}  # same POIs
+    assert path_len(out) <= path_len(zigzag) + 1.0               # never worse
+
+
 def test_dedupe_nearby_pois_collapses_coincident_keeps_distinct():
     """Near-coincident POIs collapse to the most-reviewed; distinct neighbours stay."""
     from app.services.itinerary_planner import _dedupe_nearby_pois

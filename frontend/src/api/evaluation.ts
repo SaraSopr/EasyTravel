@@ -34,14 +34,21 @@ export interface EvalPair {
 
 export interface EvalStop {
   position: number
+  poi_id: string
   name: string
+  address: string | null
   lat: number
   lng: number
+  rating: number | null
+  photo_reference: string | null
+  google_maps_url: string | null
   arrival_time: string | null
   departure_time: string | null
   transport_from_previous: string | null
   travel_minutes_from_previous: number | null
+  visit_mode: 'indoor' | 'outdoor'
   visit_duration_minutes: number
+  visit_note: string | null
   travel_category: string | null
   is_food: boolean
 }

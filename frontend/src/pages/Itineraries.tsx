@@ -46,9 +46,9 @@ export default function Itineraries() {
   const confirmTarget = itineraries.find((it) => it.itinerary_id === confirmDeleteId)
 
   return (
-    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-50 pb-28">
+    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-gray-50 to-gray-50 pb-28">
       {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-600 to-violet-600 px-6 pt-14 pb-16">
+      <div className="bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-500 px-6 pt-14 pb-16">
         <p className="text-indigo-200 text-sm font-medium mb-1.5">Your trips</p>
         <h1 className="text-2xl font-extrabold text-white tracking-tight">Itinerari</h1>
         {!loading && !error && (
@@ -67,7 +67,7 @@ export default function Itineraries() {
             ))}
           </div>
         ) : error ? (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+          <div className="text-sm text-red-600 bg-red-50/85 backdrop-blur border border-red-100/80 rounded-xl px-4 py-3">
             {error}
           </div>
         ) : itineraries.length === 0 ? (
@@ -84,12 +84,12 @@ export default function Itineraries() {
         ) : (
           <div className="flex flex-col gap-3">
             {itineraries.map((it) => (
-              <div key={it.itinerary_id} className="relative flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-4 shadow-sm">
+              <div key={it.itinerary_id} className="glass glass-specular relative flex items-center gap-3 rounded-2xl px-4 py-4">
                 <button
                   onClick={() => navigate(`/itinerary/${it.itinerary_id}`)}
                   className="flex items-center gap-3 flex-1 min-w-0 text-left active:scale-[0.99] transition-transform"
                 >
-                  <div className="w-11 h-11 shrink-0 bg-indigo-50 rounded-xl flex items-center justify-center">
+                  <div className="w-11 h-11 shrink-0 bg-white/60 border border-white/60 rounded-xl flex items-center justify-center">
                     <Map size={20} className="text-indigo-500" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -129,14 +129,14 @@ export default function Itineraries() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => !deleting && setConfirmDeleteId(null)}
           />
-          <div className="relative w-full max-w-md bg-white rounded-t-3xl px-6 pt-6 pb-10 shadow-xl">
+          <div className="glass glass-specular relative w-full max-w-md rounded-t-3xl px-6 pt-6 pb-10">
             <button
               onClick={() => !deleting && setConfirmDeleteId(null)}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
             >
               <X size={20} />
             </button>
-            <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-red-50 mb-4">
+            <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-red-50/80 border border-white/60 mb-4">
               <Trash2 size={22} className="text-red-500" />
             </div>
             <h2 className="text-lg font-bold text-gray-900 mb-1">Delete itinerary?</h2>
@@ -149,7 +149,7 @@ export default function Itineraries() {
               <button
                 onClick={() => setConfirmDeleteId(null)}
                 disabled={deleting}
-                className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 active:scale-[0.98] transition-transform disabled:opacity-50"
+                className="flex-1 py-3 rounded-xl border border-white/70 bg-white/55 text-sm font-semibold text-gray-600 active:scale-[0.98] transition-transform disabled:opacity-50"
               >
                 Cancel
               </button>

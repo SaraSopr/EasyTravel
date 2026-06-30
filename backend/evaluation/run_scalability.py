@@ -1,16 +1,22 @@
 """RQ1c scalability experiment — varies toptw_num_candidates and num_days.
 
-Fixes profile/city/routing (couple_generalist, Roma, real) and sweeps
-toptw_num_candidates across CANDIDATE_COUNTS for both TOPTW and greedy.
-Greedy ignores the candidate-count parameter but is included as reference
-for the solve-time comparison.
+Sweeps ``toptw_num_candidates`` across CANDIDATE_COUNTS for both TOPTW and
+greedy, over a grid of cities × profiles × durations so the scalability claim
+rests on multiple instances rather than a single (city, profile) pair. Greedy
+ignores the candidate-count parameter but is included as reference for the
+solve-time comparison.
+
+Each (city, profile, duration) is one "instance"; the plot aggregates across
+instances (mean + min–max band), exposing how robust the N-trend is.
 
 Output: scalability_results.csv (path configurable via --out)
 
 Usage (from backend/):
-    python -m evaluation.run_scalability
+    python -m evaluation.run_scalability                       # default grid
     python -m evaluation.run_scalability --out scalability_results.csv
-    python -m evaluation.run_scalability --city Madrid --profile couple_museums
+    python -m evaluation.run_scalability --cities Roma,Madrid  # subset
+    python -m evaluation.run_scalability --profiles all        # every profile
+    python -m evaluation.run_scalability --cities Roma --profiles couple_museums
 """
 from __future__ import annotations
 
@@ -50,8 +56,12 @@ logger = logging.getLogger("scalability")
 # ── experiment axes ──────────────────────────────────────────────────────────
 CANDIDATE_COUNTS = [20, 40, 60, 80, 100, 120]
 DURATIONS = [2, 4]
-DEFAULT_PROFILE = "couple_generalist"
-DEFAULT_CITY = "Roma"
+
+# Default grid: every ingested city × every frozen profile, so the scalability
+# claim spans the whole preference space, not a hand-picked subset. Override with
+# --cities / --profiles (comma-separated, or "all") to run a faster slice.
+DEFAULT_CITIES = list(cfg.CITIES)                       # ["Roma", "Madrid", "Porto"]
+DEFAULT_PROFILES = [p.key for p in PROFILES_BY_KEY.values()]  # all 9
 
 FIELDS = [
     "profile_key", "city", "num_days", "solver", "num_candidates",
@@ -154,8 +164,22 @@ async def _run_cell(db, profile, city, num_days: int, solver: str, num_candidate
     return row
 
 
+def _resolve_profiles(raw: str) -> list:
+    if raw.strip().lower() == "all":
+        keys = [p.key for p in PROFILES_BY_KEY.values()]
+    else:
+        keys = [k.strip() for k in raw.split(",") if k.strip()]
+    profiles = []
+    for k in keys:
+        if k not in PROFILES_BY_KEY:
+            raise SystemExit(f"Unknown profile {k!r}. Available: {sorted(PROFILES_BY_KEY)}")
+        profiles.append(PROFILES_BY_KEY[k])
+    return profiles
+
+
 async def run(args) -> None:
-    profile = PROFILES_BY_KEY[args.profile]
+    city_names = [c.strip() for c in args.cities.split(",") if c.strip()]
+    profiles = _resolve_profiles(args.profiles)
 
     orig_candidates = settings.toptw_num_candidates
     orig_routes = settings.routes_api_enabled
@@ -163,29 +187,41 @@ async def run(args) -> None:
     rows: list[dict] = []
     try:
         async with AsyncSessionLocal() as db:
-            res = await db.execute(select(City).where(City.name.ilike(args.city)))
-            city = res.scalar_one_or_none()
-            if city is None:
-                logger.error("City %r not found — run the pipeline first.", args.city)
+            cities = []
+            for name in city_names:
+                res = await db.execute(select(City).where(City.name.ilike(name)))
+                city = res.scalar_one_or_none()
+                if city is None:
+                    logger.error("City %r not found — run the pipeline first; skipping.", name)
+                    continue
+                cities.append(city)
+            if not cities:
+                logger.error("No valid cities — nothing to do.")
                 return
 
-            logger.info("Scalability sweep: %s / %s / %d candidate levels × %d durations",
-                        profile.key, city.name, len(CANDIDATE_COUNTS), len(DURATIONS))
+            n_instances = len(cities) * len(profiles) * len(DURATIONS)
+            logger.info(
+                "Scalability grid: %d cities × %d profiles × %d durations = %d instances, "
+                "%d candidate levels each (+greedy ref)",
+                len(cities), len(profiles), len(DURATIONS), n_instances, len(CANDIDATE_COUNTS),
+            )
 
-            for num_days in DURATIONS:
-                # Greedy reference — candidate count doesn't apply; use the default pool
-                logger.info("── Greedy / %d days ──", num_days)
-                settings.toptw_num_candidates = orig_candidates
-                row = await _run_cell(db, profile, city, num_days, "greedy", orig_candidates)
-                if row:
-                    rows.append(row)
+            for city in cities:
+                for profile in profiles:
+                    for num_days in DURATIONS:
+                        logger.info("════ %s / %s / %dd ════", city.name, profile.key, num_days)
+                        # Greedy reference — candidate count doesn't apply; use default pool
+                        settings.toptw_num_candidates = orig_candidates
+                        row = await _run_cell(db, profile, city, num_days, "greedy", orig_candidates)
+                        if row:
+                            rows.append(row)
 
-                # TOPTW sweep
-                for nc in CANDIDATE_COUNTS:
-                    logger.info("── TOPTW / %d days / %d candidates ──", num_days, nc)
-                    row = await _run_cell(db, profile, city, num_days, "toptw", nc)
-                    if row:
-                        rows.append(row)
+                        # TOPTW sweep over N
+                        for nc in CANDIDATE_COUNTS:
+                            logger.info("── TOPTW / %d candidates ──", nc)
+                            row = await _run_cell(db, profile, city, num_days, "toptw", nc)
+                            if row:
+                                rows.append(row)
 
     finally:
         settings.toptw_num_candidates = orig_candidates
@@ -200,9 +236,11 @@ async def run(args) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="RQ1c scalability sweep")
-    ap.add_argument("--city",    default=DEFAULT_CITY,    help="City name (must be pipeline-ingested)")
-    ap.add_argument("--profile", default=DEFAULT_PROFILE, help="Profile key from profiles.py")
-    ap.add_argument("--out",     default="scalability_results.csv", help="Output CSV path")
+    ap.add_argument("--cities",   default=",".join(DEFAULT_CITIES),
+                    help="Comma-separated city names (must be pipeline-ingested)")
+    ap.add_argument("--profiles", default=",".join(DEFAULT_PROFILES),
+                    help="Comma-separated profile keys, or 'all'")
+    ap.add_argument("--out",      default="scalability_results.csv", help="Output CSV path")
     asyncio.run(run(ap.parse_args()))
 
 

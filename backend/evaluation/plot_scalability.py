@@ -1,7 +1,13 @@
 """Plot RQ1c scalability from scalability_results.csv.
 
-Reads the output of run_scalability.py and writes
-evaluation/figures/fig3_rq1c_scalability.png.
+Reads the output of run_scalability.py (a grid of cities × profiles × durations)
+and writes evaluation/figures/fig3_rq1c_scalability.png.
+
+Each (city, profile, duration) is one instance. For TOPTW the figure shows, per
+duration, the mean over instances at each candidate level with a shaded min–max
+band, so the N-trend is visible *and* its spread across instances is exposed —
+the scalability claim no longer rests on a single (city, profile) pair. Greedy
+is drawn as a horizontal reference (its mean, candidate count does not apply).
 
 Usage (from backend/):
     python -m evaluation.plot_scalability
@@ -12,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import statistics
 from collections import defaultdict
 from pathlib import Path
 
@@ -19,7 +26,6 @@ try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
     HAS_MPL = True
 except ImportError:
     HAS_MPL = False
@@ -29,17 +35,6 @@ DURATION_COLORS = {2: "#2171b5", 4: "#d94801"}
 DURATION_MARKERS = {2: "o", 4: "s"}
 
 
-def load(csv_path: str) -> dict:
-    """Returns {(solver, num_days): [row, ...]}"""
-    cells: dict = defaultdict(list)
-    with open(csv_path) as f:
-        for row in csv.DictReader(f):
-            key = (row["solver"], int(row["num_days"]))
-            row["num_candidates"] = int(row["num_candidates"]) if row["num_candidates"] != "N/A" else None
-            cells[key].append(row)
-    return cells
-
-
 def _float(val) -> float | None:
     try:
         return float(val)
@@ -47,87 +42,129 @@ def _float(val) -> float | None:
         return None
 
 
+def load(csv_path: str) -> list[dict]:
+    rows = []
+    with open(csv_path) as f:
+        for row in csv.DictReader(f):
+            nc = row.get("num_candidates")
+            row["num_candidates"] = int(nc) if nc not in ("N/A", "", None) else None
+            row["num_days"] = int(row["num_days"])
+            rows.append(row)
+    return rows
+
+
+def _quantile(vals: list[float], q: float) -> float:
+    """Linear-interpolated quantile (no numpy dependency)."""
+    s = sorted(vals)
+    if len(s) == 1:
+        return s[0]
+    pos = q * (len(s) - 1)
+    lo = int(pos)
+    frac = pos - lo
+    hi = min(lo + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * frac
+
+
+def _aggregate(rows: list[dict], solver: str, num_days: int, metric: str):
+    """Returns (xs, means, los, his) over candidate levels for TOPTW, aggregating
+    across city × profile instances. Band is the inter-quartile range (25–75th
+    percentile) — robust to single-instance outliers (e.g. cold-cache solve time).
+    xs are sorted candidate counts."""
+    by_n: dict[int, list[float]] = defaultdict(list)
+    for r in rows:
+        if r["solver"] != solver or r["num_days"] != num_days or r["num_candidates"] is None:
+            continue
+        v = _float(r[metric])
+        if v is not None:
+            by_n[r["num_candidates"]].append(v)
+    xs = sorted(by_n)
+    means = [statistics.mean(by_n[x]) for x in xs]
+    los = [_quantile(by_n[x], 0.25) for x in xs]
+    his = [_quantile(by_n[x], 0.75) for x in xs]
+    return xs, means, los, his
+
+
+def _greedy_mean(rows: list[dict], num_days: int, metric: str) -> float | None:
+    vals = [
+        _float(r[metric]) for r in rows
+        if r["solver"] == "greedy" and r["num_days"] == num_days and _float(r[metric]) is not None
+    ]
+    return statistics.mean(vals) if vals else None
+
+
 def plot(csv_path: str, out_dir: Path) -> None:
     if not HAS_MPL:
         return
-    cells = load(csv_path)
-    durations = sorted({k[1] for k in cells})
+    rows = load(csv_path)
+    durations = sorted({r["num_days"] for r in rows})
+    instances = {(r["city"], r["profile_key"], r["num_days"]) for r in rows}
+    candidate_levels = sorted({r["num_candidates"] for r in rows if r["num_candidates"] is not None})
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    panels = [
+        ("avg_relevance",        "avg_relevance (↑ better)",       "Selection quality", True),
+        ("real_overrun_min_avg", "budget overrun min/day (↓ better)", "Feasibility",    False),
+        ("solve_time_ms",        "solve time (ms)",                 "Runtime",         False),
+    ]
+    fig, axes = plt.subplots(1, len(panels), figsize=(18, 5))
     fig.suptitle(
-        "RQ1c — Scalability: selection quality and solve time vs candidate pool size\n"
-        f"(profile: couple_generalist, city: Roma, routing: real)",
+        "RQ1c — Scalability vs candidate pool size (N): TOPTW mean over instances, "
+        "IQR band (25–75th pct)\n"
+        f"({len(instances)} instances = "
+        f"{len({i[0] for i in instances})} cities × "
+        f"{len({i[1] for i in instances})} profiles × {len(durations)} durations; routing: real)",
         fontsize=11, fontweight="bold",
     )
 
-    for ax, metric, ylabel, title, do_zoom in [
-        (axes[0], "avg_relevance",  "avg_relevance (↑ better)",   "Selection quality vs candidate pool",  True),
-        (axes[1], "solve_time_ms",  "solve time (ms)",             "Solve time vs candidate pool",         False),
-    ]:
+    for ax, (metric, ylabel, title, do_zoom) in zip(axes, panels):
         handles = []
-
+        band_vals = []   # collect band edges to size the y-axis
         for num_days in durations:
             color = DURATION_COLORS.get(num_days, "#999")
             marker = DURATION_MARKERS.get(num_days, "^")
 
-            # TOPTW curve
-            toptw_rows = sorted(
-                [r for r in cells.get(("toptw", num_days), []) if r["num_candidates"] is not None],
-                key=lambda r: r["num_candidates"],
-            )
-            if toptw_rows:
-                xs = [r["num_candidates"] for r in toptw_rows]
-                ys = [_float(r[metric]) or 0 for r in toptw_rows]
-                line, = ax.plot(xs, ys, color=color, marker=marker, linewidth=2,
-                                markersize=6, label=f"TOPTW / {num_days}d")
+            xs, means, los, his = _aggregate(rows, "toptw", num_days, metric)
+            if xs:
+                ax.fill_between(xs, los, his, color=color, alpha=0.13, linewidth=0)
+                line, = ax.plot(xs, means, color=color, marker=marker, linewidth=2,
+                                markersize=6, label=f"TOPTW / {num_days}d (mean, IQR band)")
                 handles.append(line)
+                band_vals += los + his
 
-            # Greedy reference (horizontal dashed line — one value per duration)
-            greedy_rows = [r for r in cells.get(("greedy", num_days), [])]
-            if greedy_rows:
-                gval = _float(greedy_rows[0][metric])
-                if gval is not None:
-                    xmin = min(CANDIDATE_COUNTS_HINT) if CANDIDATE_COUNTS_HINT else 20
-                    xmax = max(CANDIDATE_COUNTS_HINT) if CANDIDATE_COUNTS_HINT else 120
-                    ref = ax.axhline(gval, color=color, linewidth=1.4, linestyle="--", alpha=0.6)
-                    ax.text(xmax + 1, gval, f"Greedy/{num_days}d",
-                            va="center", fontsize=7.5, color=color, alpha=0.8)
+            gval = _greedy_mean(rows, num_days, metric)
+            if gval is not None:
+                ax.axhline(gval, color=color, linewidth=1.4, linestyle="--", alpha=0.6)
+                xmax = max(candidate_levels) if candidate_levels else 120
+                ax.text(xmax + 1, gval, f"Greedy/{num_days}d", va="center",
+                        fontsize=7.5, color=color, alpha=0.8)
 
-        # default reference line at toptw_num_candidates=80
+        # Tighten the y-axis to the IQR band (means + quartiles), so the trend is
+        # legible; do this BEFORE drawing the N=80 marker so its label is anchored
+        # to the final axes.
+        if do_zoom and band_vals:
+            pad = (max(band_vals) - min(band_vals)) * 0.08 or 0.01
+            ax.set_ylim(min(band_vals) - pad, max(band_vals) + pad)
+
+        # default reference line at N=80 (label anchored in axes fraction)
         ax.axvline(80, color="#aaa", linewidth=1, linestyle=":", alpha=0.7)
-        ax.text(81, ax.get_ylim()[0] if ax.get_ylim()[0] != 0 else 0,
-                "default\n(N=80)", fontsize=7, color="#888", va="bottom")
+        ax.text(80, 0.02, " default (N=80)", fontsize=7, color="#888",
+                va="bottom", ha="left", transform=ax.get_xaxis_transform())
 
-        ax.set_xlabel("toptw_num_candidates", fontsize=10)
+        ax.set_xlabel("toptw_num_candidates (N)", fontsize=10)
         ax.set_ylabel(ylabel, fontsize=9)
         ax.set_title(title, fontsize=10, fontweight="bold", pad=8)
         ax.spines[["top", "right"]].set_visible(False)
-        ax.legend(handles=handles, fontsize=8, frameon=False)
-        if do_zoom and handles:
-            # tighten y-axis so differences are visible
-            all_vals = []
-            for num_days in durations:
-                for r in cells.get(("toptw", num_days), []):
-                    v = _float(r[metric])
-                    if v is not None:
-                        all_vals.append(v)
-            if all_vals:
-                ax.set_ylim(min(all_vals) * 0.985, max(all_vals) * 1.015)
+        if handles:
+            ax.legend(handles=handles, fontsize=8, frameon=False)
 
     fig.tight_layout()
     out = out_dir / "fig3_rq1c_scalability.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved: {out}")
-
-
-# fallback hint for axis limits (updated at runtime from the CSV)
-CANDIDATE_COUNTS_HINT: list[int] = []
+    print(f"Saved: {out}  ({len(instances)} instances)")
 
 
 def main() -> None:
-    global CANDIDATE_COUNTS_HINT
     ap = argparse.ArgumentParser(description="Plot RQ1c scalability figure")
     ap.add_argument("--csv", default="scalability_results.csv")
     ap.add_argument("--out", default="evaluation/figures")
@@ -137,13 +174,6 @@ def main() -> None:
         print(f"CSV not found: {args.csv}")
         print("Run first: python -m evaluation.run_scalability")
         return
-
-    # populate hint from actual data
-    with open(args.csv) as f:
-        for row in csv.DictReader(f):
-            if row["num_candidates"] not in ("N/A", "", None):
-                CANDIDATE_COUNTS_HINT.append(int(row["num_candidates"]))
-    CANDIDATE_COUNTS_HINT = sorted(set(CANDIDATE_COUNTS_HINT))
 
     plot(args.csv, Path(args.out))
 

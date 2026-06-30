@@ -130,6 +130,11 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
     [stops],
   )
 
+  // Transit/taxi legs are drawn dotted: optimised on real travel time, so a long
+  // straight connector is intentional, not a routing error.
+  const isRideLeg = (mode: string | null) => mode === 'transit' || mode === 'taxi'
+  const hasRide = useMemo(() => stops.some((s) => isRideLeg(s.transport_from_previous)), [stops])
+
   // Keep the latest coords reachable from callbacks that run on map (re)mount.
   const dayCoordsRef = useRef(dayCoords)
   dayCoordsRef.current = dayCoords
@@ -313,12 +318,24 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
           <ZoomControl position="bottomright" />
           <MapBridge onReady={onMapReady} />
 
-          {dayCoords.length > 1 && (
-            <Polyline
-              positions={dayCoords}
-              pathOptions={{ color, weight: 4, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }}
-            />
-          )}
+          {stops.slice(1).map((stop, i) => {
+            const from = stops[i]
+            const ride = isRideLeg(stop.transport_from_previous)
+            return (
+              <Polyline
+                key={`leg-${stop.poi_id}`}
+                positions={[[from.lat, from.lng], [stop.lat, stop.lng]]}
+                pathOptions={{
+                  color,
+                  weight: ride ? 3 : 4,
+                  opacity: ride ? 0.7 : 0.8,
+                  dashArray: ride ? '1 7' : undefined,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+            )
+          })}
           {stops.map((stop, i) => (
             <Marker
               key={stop.poi_id}
@@ -375,6 +392,20 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
       </div>
       )}
 
+      {/* Walk/transit legend — below the map, only when a ride leg exists */}
+      {!sheetItemId && hasRide && (
+        <div className="flex items-center justify-center gap-4 px-1 text-xs font-medium text-gray-500">
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 border-t-[3px] border-gray-500 rounded-full" />
+            Walk
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 border-t-[3px] border-dotted border-gray-500" />
+            Transit
+          </span>
+        </div>
+      )}
+
       {/* Stop carousel — synced to the map */}
       <div
         ref={carouselRef}
@@ -403,16 +434,16 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
           outside the main map's DOM subtree and tears down cleanly on close. */}
       {sheetItemId && createPortal(
         <div className="fixed inset-0 z-50 flex justify-center" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/40" onClick={closeSheet} />
-          <div className="relative w-full max-w-md h-full bg-white flex flex-col shadow-2xl">
-            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-gray-100 shrink-0">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeSheet} />
+          <div className="glass glass-specular relative w-full max-w-md h-full flex flex-col">
+            <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-white/60 shrink-0">
               <div className="min-w-0">
                 <p className="text-xs text-gray-500 font-medium">Replacing</p>
                 <h3 className="text-base font-bold text-gray-900 truncate">{sheetStopName}</h3>
               </div>
               <button
                 onClick={closeSheet}
-                className="shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 active:scale-95"
+                className="shrink-0 w-8 h-8 rounded-full bg-white/65 border border-white/70 shadow-sm flex items-center justify-center text-gray-600 active:scale-95"
               >
                 <X size={16} />
               </button>
@@ -420,7 +451,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
 
             {/* Mini-map — shows the day route with the replacing stop and hovered alternative */}
             {replacingStop && (
-              <div className="overflow-hidden border-b border-gray-100 h-[45vh] shrink-0">
+              <div className="overflow-hidden border-b border-white/60 h-[45vh] shrink-0">
                 <MapContainer
                   key={sheetItemId!}
                   center={[replacingStop.lat, replacingStop.lng]}
@@ -492,7 +523,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
                       onPointerEnter={() => setHoveredAlt(alt)}
                       onPointerLeave={() => setHoveredAlt(null)}
                       disabled={busyId !== null}
-                      className="text-left bg-white border border-gray-100 rounded-2xl p-2.5 shadow-sm active:scale-[0.99] transition-transform disabled:opacity-50 flex gap-3 items-center"
+                      className="text-left bg-white/60 border border-white/70 rounded-2xl p-2.5 shadow-sm active:scale-[0.99] transition-transform disabled:opacity-50 flex gap-3 items-center"
                     >
                       <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
                         {altPhoto ? (
@@ -570,7 +601,7 @@ function StopCard({
 
   return (
     <article
-      className={`snap-item shrink-0 w-[84%] bg-white rounded-3xl overflow-hidden shadow-md transition-all duration-300 ${
+      className={`snap-item shrink-0 w-[84%] flex flex-col bg-white rounded-3xl overflow-hidden shadow-md transition-all duration-300 ${
         active ? 'ring-2 ring-offset-2 ring-offset-gray-50' : 'opacity-95'
       }`}
       style={active ? ({ boxShadow: `0 12px 32px ${color}33`, '--tw-ring-color': color } as CSSProperties) : {}}
@@ -581,7 +612,9 @@ function StopCard({
           <img
             src={photo}
             alt={stop.name}
-            loading="lazy"
+            loading="eager"
+            fetchPriority={active ? 'high' : 'auto'}
+            decoding="async"
             onError={() => setImgError(true)}
             className="w-full h-full object-cover"
           />
@@ -621,7 +654,7 @@ function StopCard({
       </button>
 
       {/* Body */}
-      <div className="p-4 flex flex-col gap-3">
+      <div className="p-4 flex flex-col gap-3 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="inline-flex items-center gap-1 text-xs bg-gray-50 text-gray-600 px-2.5 py-1 rounded-lg font-medium border border-gray-100">
             {stop.visit_mode === 'outdoor' ? '☀️' : '🎟️'} {stop.visit_duration_minutes} min
@@ -650,7 +683,7 @@ function StopCard({
           </p>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 mt-auto">
           {stop.google_maps_url && (
             <a
               href={stop.google_maps_url}

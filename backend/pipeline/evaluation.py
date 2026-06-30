@@ -6,14 +6,57 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import sys
 from collections import Counter
 
 import numpy as np
 from sqlalchemy import func, select
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from app.database import AsyncSessionLocal
 from app.models.classification_log import PoiClassificationLog
 from app.models.tourism_validation_log import PoiTourismValidationLog
+
+
+def cohens_kappa(labels1: list[str], labels2: list[str]) -> float | None:
+    """
+    Cohen's kappa for two raters over paired categorical labels.
+
+    Corrects the observed agreement for the agreement expected by chance
+    given each rater's marginal label frequencies. Returns None if there
+    are no paired labels, or 1.0 when both raters are perfectly constant.
+    """
+    n = len(labels1)
+    if n == 0:
+        return None
+
+    p_o = sum(1 for a, b in zip(labels1, labels2) if a == b) / n
+
+    categories = set(labels1) | set(labels2)
+    count1 = Counter(labels1)
+    count2 = Counter(labels2)
+    p_e = sum((count1[c] / n) * (count2[c] / n) for c in categories)
+
+    if p_e == 1.0:  # both raters always pick the same single label
+        return 1.0
+    return (p_o - p_e) / (1 - p_e)
+
+
+def _kappa_label(k: float) -> str:
+    """Landis & Koch (1977) interpretation bands for Cohen's kappa."""
+    if k < 0:
+        return "poor"
+    if k <= 0.20:
+        return "slight"
+    if k <= 0.40:
+        return "fair"
+    if k <= 0.60:
+        return "moderate"
+    if k <= 0.80:
+        return "substantial"
+    return "almost perfect"
 
 
 async def get_agreement_stats(
@@ -67,9 +110,22 @@ async def get_agreement_stats(
 
         confidence_dist = Counter(l.final_confidence for l in logs)
 
+        # Cohen's kappa over POIs where both LLMs produced a category
+        paired = [
+            (l.llm1_category, l.llm2_category)
+            for l in logs
+            if l.llm1_category and l.llm2_category
+        ]
+        kappa = cohens_kappa(
+            [p[0] for p in paired],
+            [p[1] for p in paired],
+        )
+
         return {
             "total_classified": total,
             "category_agreement_rate": len(agreements) / total,
+            "cohens_kappa": kappa,
+            "kappa_n": len(paired),
             "mean_cosine_distance": float(np.mean(distances)) if distances else None,
             "std_cosine_distance": float(np.std(distances)) if distances else None,
             "disagreement_count": len(disagreements),
@@ -220,6 +276,28 @@ async def get_tourism_validation_stats(
         }
 
 
+async def get_per_city_agreement() -> list[dict]:
+    """Per-city agreement rate and Cohen's kappa, sorted by city name."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PoiClassificationLog.city_name).distinct()
+        )
+        cities = sorted(c for (c,) in result.all() if c)
+
+    rows = []
+    for city in cities:
+        stats = await get_agreement_stats(city_name=city)
+        if "error" in stats:
+            continue
+        rows.append({
+            "city": city,
+            "n": stats["total_classified"],
+            "agreement_rate": stats["category_agreement_rate"],
+            "cohens_kappa": stats.get("cohens_kappa"),
+        })
+    return rows
+
+
 async def print_evaluation_report(city_name: str | None = None) -> None:
     """Print a formatted evaluation report to stdout."""
     print(f"\n{'=' * 60}")
@@ -236,6 +314,23 @@ async def print_evaluation_report(city_name: str | None = None) -> None:
         f"Category agreement rate (LLM1 vs LLM2): "
         f"{stats['category_agreement_rate']:.1%}"
     )
+    if stats.get("cohens_kappa") is not None:
+        print(
+            f"Cohen's kappa (chance-corrected):       "
+            f"{stats['cohens_kappa']:.3f}  ({_kappa_label(stats['cohens_kappa'])}, "
+            f"n={stats['kappa_n']})"
+        )
+
+    if city_name is None:
+        print(f"\nPer-city agreement (LLM1 vs LLM2):")
+        print(f"  {'city':15s} {'n':>5s}  {'agree':>7s}  {'kappa':>7s}")
+        for row in await get_per_city_agreement():
+            k = row["cohens_kappa"]
+            k_str = f"{k:.3f}" if k is not None else "   n/a"
+            print(
+                f"  {row['city']:15s} {row['n']:5d}  "
+                f"{row['agreement_rate']:6.1%}  {k_str:>7s}"
+            )
     if stats["mean_cosine_distance"] is not None:
         print(
             f"Mean cosine distance between vectors: "

@@ -5,18 +5,29 @@ import {
   getPairs, postRating, getEvalItineraries, postLikert,
   type EvalPair, type EvalItinerary,
 } from '@/api/evaluation'
-import ItineraryMap from '@/components/ItineraryMap'
+import ItineraryExplorer from '@/components/ItineraryExplorer'
 import { poiPhotoUrl } from '@/utils/photos'
 import { getCategoryColor } from '@/utils/categoryColors'
-import type { ItineraryDay } from '@/types'
+import { visibleWarnings } from '@/utils/warnings'
+import type { Itinerary } from '@/types'
 
 type Tab = 'pairs' | 'likert'
 
-// Mirror ItineraryTimeline's transport glyphs so realism reads the same here.
-function transportLabel(mode: string | null): string {
-  if (mode === 'driving' || mode === 'taxi') return '🚗'
-  if (mode === 'transit') return '🚌'
-  return '🚶'
+// Reuses the app's own itinerary layout so realism reads the same here.
+// `item_id` is forced null and `is_new_suggestion` true because these are
+// unsaved snapshots — never persisted ItineraryItem rows — so the
+// replace/remove/visited actions (gated on item_id) stay disabled.
+function toItinerary(it: EvalItinerary): Itinerary {
+  return {
+    itinerary_id: it.itinerary_id,
+    city: it.payload.city,
+    num_days: it.payload.num_days,
+    warnings: it.payload.warnings,
+    days: it.payload.days.map((d) => ({
+      day_number: d.day_number,
+      stops: d.stops.map((s) => ({ ...s, is_new_suggestion: true, item_id: null })),
+    })) as unknown as Itinerary['days'],
+  }
 }
 
 function ProfileCard({ profile }: { profile: EvalPair['profile'] }) {
@@ -25,7 +36,7 @@ function ProfileCard({ profile }: { profile: EvalPair['profile'] }) {
     .sort((a, b) => b[1] - a[1])
     .map(([k]) => k)
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 mb-4">
+    <div className="glass glass-specular rounded-2xl px-4 py-3.5 mb-4">
       <p className="text-sm text-indigo-500 font-bold uppercase tracking-wide mb-1">Who this trip is for</p>
       <p className="font-extrabold text-gray-900 text-lg leading-tight">{profile.label}</p>
       {profile.description && (
@@ -38,7 +49,7 @@ function ProfileCard({ profile }: { profile: EvalPair['profile'] }) {
           </span>
         )}
         {profile.age_range && (
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/60 text-gray-500 font-medium">
             {profile.age_range}
           </span>
         )}
@@ -75,8 +86,8 @@ function PoiOption({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick() }
             }}
-            className={`flex flex-col text-left w-full h-full rounded-2xl border-2 shadow-sm overflow-hidden active:scale-[0.98] transition-all cursor-pointer ${
-              selected ? 'border-green-500 bg-green-50' : 'bg-white border-gray-100 hover:border-indigo-400'
+            className={`glass flex flex-col text-left w-full h-full rounded-2xl border-2 overflow-hidden active:scale-[0.98] transition-all cursor-pointer ${
+              selected ? 'border-green-500 bg-green-50/90' : 'border-white/60 hover:border-indigo-400'
             }`}
           >
             <div className="relative w-full h-40 bg-gray-100 shrink-0">
@@ -131,8 +142,8 @@ function PoiOption({
         </div>
 
         {/* ── Back: the description ── */}
-        <div className={`absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-2xl border-2 shadow-sm p-3.5 flex flex-col ${
-          selected ? 'border-green-500 bg-green-50' : 'bg-white border-indigo-100'
+        <div className={`glass absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-2xl border-2 p-3.5 flex flex-col ${
+          selected ? 'border-green-500 bg-green-50/90' : 'border-indigo-100'
         }`}>
           <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wide mb-1.5 line-clamp-2">
             {option.name}
@@ -142,7 +153,7 @@ function PoiOption({
           </p>
           <button
             onClick={() => setFlipped(false)}
-            className="mt-3 shrink-0 w-full flex items-center justify-center gap-1 py-2 rounded-xl border border-gray-200 text-gray-500 text-xs font-semibold hover:bg-gray-50 active:scale-[0.98] transition-all"
+            className="mt-3 shrink-0 w-full flex items-center justify-center gap-1 py-2 rounded-xl border border-white/70 bg-white/55 text-gray-500 text-xs font-semibold hover:bg-white/80 active:scale-[0.98] transition-all"
           >
             <ChevronLeft size={15} /> Back to photo
           </button>
@@ -207,7 +218,7 @@ function PairwisePanel({ evaluator }: { evaluator: string }) {
       <button
         disabled={submitting}
         onClick={() => void choose('equal')}
-        className="w-full mt-4 text-center text-[15px] text-gray-700 font-semibold py-3.5 rounded-2xl border-2 border-gray-100 bg-white hover:border-red-400 hover:text-red-500 hover:bg-red-50 active:scale-[0.99] transition-all disabled:opacity-50"
+        className="glass glass-specular w-full mt-4 text-center text-[15px] text-gray-700 font-semibold py-3.5 rounded-2xl border-2 border-white/60 hover:border-red-400 hover:text-red-500 hover:bg-red-50/85 active:scale-[0.99] transition-all disabled:opacity-50"
       >
         Equivalent / not sure
       </button>
@@ -255,36 +266,19 @@ function LikertPanel({ evaluator }: { evaluator: string }) {
       <ProfileCard profile={current.profile} />
       <p className="text-xs text-gray-400 font-medium mb-2">{current.city} · {current.num_days} days</p>
 
-      {/* Route map — needed to judge whether the day is geographically feasible */}
-      <div className="mb-4">
-        <ItineraryMap days={current.payload.days as unknown as ItineraryDay[]} />
-      </div>
-
-      <div className="space-y-3 mb-5">
-        {current.payload.days.map((d) => (
-          <div key={d.day_number} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
-            <p className="text-xs font-bold text-indigo-600 mb-2">Day {d.day_number}</p>
-            <ul className="space-y-1">
-              {d.stops.map((s, i) => (
-                <li key={s.position}>
-                  {/* Travel leg from the previous stop — the realism signal */}
-                  {i > 0 && s.transport_from_previous != null && s.travel_minutes_from_previous != null && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-gray-400 pl-[88px] py-0.5">
-                      <span>{transportLabel(s.transport_from_previous)}</span>
-                      <span>{Math.round(s.travel_minutes_from_previous)} min</span>
-                    </div>
-                  )}
-                  <div className="flex items-baseline gap-2 text-sm">
-                    <span className="text-[11px] text-gray-400 w-20 shrink-0">
-                      {s.arrival_time}–{s.departure_time}
-                    </span>
-                    <span className={s.is_food ? 'text-amber-600' : 'text-gray-700'}>{s.name}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+      {/* Same explorer the app shows on /itinerary — realism reads the same here. */}
+      {!!visibleWarnings(current.payload.warnings).length && (
+        <div className="flex flex-col gap-2 mb-4">
+          {visibleWarnings(current.payload.warnings).map((w, i) => (
+            <div key={i} className="flex items-start gap-2 bg-amber-50/85 backdrop-blur border border-amber-100/80 rounded-xl px-4 py-3">
+              <span className="text-amber-500 mt-0.5 shrink-0">⚠️</span>
+              <p className="text-xs text-amber-700">{w}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mb-5">
+        <ItineraryExplorer itinerary={toItinerary(current)} onChange={() => {}} />
       </div>
       <div className="space-y-4 mb-4">
         {dims.map((d) => (
@@ -297,8 +291,8 @@ function LikertPanel({ evaluator }: { evaluator: string }) {
                   onClick={() => setScores((s) => ({ ...s, [d.key]: v }))}
                   className={`flex-1 py-2 rounded-lg text-sm font-semibold border-2 transition-all ${
                     scores[d.key] === v
-                      ? 'border-indigo-500 bg-indigo-50 text-indigo-600'
-                      : 'border-gray-100 bg-white text-gray-400'
+                      ? 'border-indigo-500 bg-white/80 text-indigo-600 shadow-sm'
+                      : 'border-white/60 bg-white/45 text-gray-400'
                   }`}
                 >
                   {v}
@@ -324,8 +318,8 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 function Done({ count, label }: { count: number; label: string }) {
   return (
-    <div className="bg-white rounded-3xl border border-gray-100 shadow-sm px-7 py-8 flex flex-col items-center gap-3 text-center">
-      <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center">
+    <div className="glass glass-specular rounded-3xl px-7 py-8 flex flex-col items-center gap-3 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-white/60 border border-white/60 flex items-center justify-center">
         <Check size={26} className="text-emerald-500" />
       </div>
       <p className="font-bold text-gray-800">You completed all {label}.</p>
@@ -336,7 +330,7 @@ function Done({ count, label }: { count: number; label: string }) {
 function Progress({ done, total }: { done: number; total: number }) {
   return (
     <div className="mb-4">
-      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+      <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
         <div
           className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all"
           style={{ width: `${total ? (done / total) * 100 : 0}%` }}
@@ -364,8 +358,16 @@ export default function Evaluation() {
   if (!evaluator) {
     const start = () => nameInput.trim() && setParams({ evaluator: nameInput.trim() })
     return (
-      <div className="max-w-md mx-auto min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-indigo-50 via-gray-50 to-gray-50 px-6">
-        <div className="w-full bg-white rounded-3xl border border-gray-100 shadow-sm px-7 py-8">
+      <div className="relative max-w-md mx-auto min-h-screen flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-indigo-50 via-violet-50 to-gray-50 px-6">
+        <div
+          aria-hidden="true"
+          className="absolute left-[-5rem] top-1/4 h-56 w-56 rounded-full bg-indigo-300/35 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          className="absolute right-[-5rem] bottom-1/4 h-56 w-56 rounded-full bg-fuchsia-300/25 blur-3xl"
+        />
+        <div className="glass glass-specular relative w-full rounded-3xl px-7 py-8">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center mb-5 shadow-md shadow-indigo-200">
             <Sparkles size={24} className="text-white" />
           </div>
@@ -376,7 +378,7 @@ export default function Evaluation() {
             onChange={(e) => setNameInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && start()}
             placeholder="e.g. evaluator-01"
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+            className="w-full border border-white/60 bg-white/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] rounded-xl px-4 py-3 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/85"
           />
           <button
             disabled={!nameInput.trim()}

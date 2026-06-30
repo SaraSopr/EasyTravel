@@ -558,30 +558,47 @@ async def get_stop_alternatives(
 
     ranked = recommendation_service.rank_pois(user_prefs, candidates)
     current_category = item.place.travel_category
-    # Same-category alternatives first, then by similarity.
-    ranked.sort(
-        key=lambda ps: (ps[0].travel_category == current_category, ps[1]),
-        reverse=True,
-    )
 
-    out: list[PoiSuggestion] = []
-    for poi, sim in ranked:
+    # Group by category (each group kept in descending-similarity order) so we
+    # can offer alternatives across categories, not just same-category swaps.
+    by_category: dict[str | None, list[tuple[Poi, float]]] = {}
+    for poi, sim in sorted(ranked, key=lambda ps: ps[1], reverse=True):
         if poi.id in used_ids:
             continue
-        out.append(PoiSuggestion(
-            poi_id=poi.id,
-            name=poi.name,
-            address=poi.address,
-            lat=poi.lat,
-            lng=poi.lng,
-            travel_category=poi.travel_category,
-            rating=poi.rating,
-            photo_reference=poi.photo_reference,
-            google_maps_url=_google_maps_url(poi),
-            similarity=round(sim, 4),
-        ))
-        if len(out) >= limit:
-            break
+        by_category.setdefault(poi.travel_category, []).append((poi, sim))
+
+    # Order categories by their best candidate's similarity, but always lead
+    # with the current category so a like-for-like swap is the first option.
+    other_categories = sorted(
+        (c for c in by_category if c != current_category),
+        key=lambda c: by_category[c][0][1],
+        reverse=True,
+    )
+    category_order = (
+        [current_category] if current_category in by_category else []
+    ) + other_categories
+
+    # Round-robin across categories to guarantee a diverse, multi-category list.
+    out: list[PoiSuggestion] = []
+    while len(out) < limit and any(by_category[c] for c in category_order):
+        for cat in category_order:
+            if not by_category[cat]:
+                continue
+            poi, sim = by_category[cat].pop(0)
+            out.append(PoiSuggestion(
+                poi_id=poi.id,
+                name=poi.name,
+                address=poi.address,
+                lat=poi.lat,
+                lng=poi.lng,
+                travel_category=poi.travel_category,
+                rating=poi.rating,
+                photo_reference=poi.photo_reference,
+                google_maps_url=_google_maps_url(poi),
+                similarity=round(sim, 4),
+            ))
+            if len(out) >= limit:
+                break
     return out
 
 

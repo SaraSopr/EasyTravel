@@ -39,7 +39,7 @@ export default function ExperienceDetailSheet({
       {/* Backdrop */}
       <div
         onClick={onClose}
-        className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-300 ${
+        className={`fixed inset-0 bg-black/40 backdrop-blur-sm z-40 transition-opacity duration-300 ${
           open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
       />
@@ -51,13 +51,13 @@ export default function ExperienceDetailSheet({
         }`}
       >
         <div
-          className={`relative w-full max-w-sm bg-white rounded-3xl shadow-2xl transition-transform duration-300 ease-out ${
+          className={`glass glass-specular relative w-full max-w-sm rounded-3xl transition-transform duration-300 ease-out ${
             open ? 'scale-100' : 'scale-90'
           }`}
         >
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 z-10"
+            className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/70 border border-white/70 text-gray-500 shadow-sm z-10"
           >
             <X size={16} />
           </button>
@@ -89,7 +89,7 @@ export default function ExperienceDetailSheet({
                 onClick={() => { onToggle(); onClose() }}
                 className={`mt-6 flex items-center justify-center gap-2 w-full font-semibold rounded-xl py-3.5 transition-all active:scale-[0.98] ${
                   selected
-                    ? 'bg-indigo-50 border-2 border-indigo-400 text-indigo-600'
+                    ? 'bg-white/70 border-2 border-indigo-400 text-indigo-600'
                     : 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md shadow-indigo-200'
                 }`}
               >

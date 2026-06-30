@@ -12,10 +12,10 @@ export default function PlaceCard({ place, selected, onToggle }: PlaceCardProps)
   return (
     <button
       onClick={onToggle}
-      className={`relative w-full text-left p-4 rounded-2xl border-2 bg-white transition-all active:scale-[0.98] shadow-sm ${
+      className={`glass glass-specular relative w-full text-left p-4 rounded-2xl border-2 transition-all active:scale-[0.98] ${
         selected
           ? 'border-emerald-400 shadow-emerald-100 shadow-md'
-          : 'border-gray-100'
+          : 'border-white/60'
       }`}
     >
       {selected && (
@@ -40,7 +40,7 @@ export default function PlaceCard({ place, selected, onToggle }: PlaceCardProps)
         </div>
       </div>
 
-      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-50">
+      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-white/60">
         <span className="flex items-center gap-1.5 text-xs text-gray-400 font-medium">
           <Clock size={12} />
           {place.visit_duration_minutes} min
@@ -52,7 +52,7 @@ export default function PlaceCard({ place, selected, onToggle }: PlaceCardProps)
               <Star size={11} className="fill-amber-400 text-amber-400" />
               {(place.score * 5).toFixed(1)}
             </span>
-            <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+            <div className="flex-1 h-1 bg-white/60 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-indigo-400 to-violet-400 rounded-full"
                 style={{ width: `${place.score * 100}%` }}

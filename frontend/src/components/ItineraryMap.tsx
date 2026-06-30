@@ -76,6 +76,11 @@ export default function ItineraryMap({ days }: ItineraryMapProps) {
   const center: [number, number] = [allStops[0].lat, allStops[0].lng]
   const allCoords: [number, number][] = visibleStops.map(s => [s.lat, s.lng])
 
+  // A "ride" leg (transit/taxi) is drawn dotted: those legs are optimised on real
+  // travel time, so a long straight connector is intentional, not a routing error.
+  const isRideLeg = (mode: string | null) => mode === 'transit' || mode === 'taxi'
+  const hasRide = visibleStops.some(s => isRideLeg(s.transport_from_previous))
+
   return (
     <div className="flex flex-col gap-3">
       {days.length > 1 && (
@@ -101,6 +106,19 @@ export default function ItineraryMap({ days }: ItineraryMapProps) {
         </div>
       )}
 
+      {hasRide && (
+        <div className="flex items-center gap-4 px-1 text-[11px] text-gray-400">
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 border-t-[3px] border-gray-400 rounded-full" />
+            Walk
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 border-t-[3px] border-dotted border-gray-400" />
+            Transit
+          </span>
+        </div>
+      )}
+
       <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-md">
         <MapContainer
           center={center}
@@ -122,16 +140,27 @@ export default function ItineraryMap({ days }: ItineraryMapProps) {
             if (!visibleDays.has(day.day_number)) return null
             const { color, colorLight } = DAY_PALETTE[dayIndex % DAY_PALETTE.length]
             const validStops = day.stops.filter(s => s.lat && s.lng)
-            const coords: [number, number][] = validStops.map(s => [s.lat, s.lng])
 
             return (
               <Fragment key={day.day_number}>
-                {coords.length > 1 && (
-                  <Polyline
-                    positions={coords}
-                    pathOptions={{ color, weight: 4, opacity: 0.75, lineCap: 'round', lineJoin: 'round' }}
-                  />
-                )}
+                {validStops.slice(1).map((stop, i) => {
+                  const from = validStops[i]
+                  const ride = isRideLeg(stop.transport_from_previous)
+                  return (
+                    <Polyline
+                      key={`${day.day_number}-leg-${i}`}
+                      positions={[[from.lat, from.lng], [stop.lat, stop.lng]]}
+                      pathOptions={{
+                        color,
+                        weight: ride ? 3 : 4,
+                        opacity: ride ? 0.65 : 0.75,
+                        dashArray: ride ? '1 7' : undefined,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                      }}
+                    />
+                  )
+                })}
                 {validStops.map((stop, stopIdx) => (
                   <Marker
                     key={stop.poi_id}

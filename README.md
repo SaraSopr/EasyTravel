@@ -59,8 +59,8 @@ EasyTravel/
 | Rate limiting | slowapi |
 | LLM prompts | Jinja2 templates |
 | POI data | Google Places Nearby Search + Details API |
-| Experience discovery | Anthropic Claude Sonnet 4.6 (web search tool) |
-| LLM classifier | Anthropic Claude Haiku 4.5 (3-LLM ensemble) |
+| Experience discovery | OpenAI `gpt-5.4-mini` (web search tool) |
+| LLM classifier | OpenAI `gpt-5.4-mini` (3-call ensemble) |
 | Photo storage | Cloudflare R2 (S3-compatible, optional) |
 | Email (OTP) | Resend API (optional) |
 | Evaluation UI | Streamlit + Plotly |
@@ -115,12 +115,14 @@ Backend variables live in `backend/.env`:
 | `SECRET_KEY` | ✅ | ≥32 random characters, used to sign JWTs |
 | `ALGORITHM` | ✅ | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | ✅ | Default `10080` (7 days) |
-| `ANTHROPIC_API_KEY` | ✅ | Used by both onboarding discovery (Sonnet + web search) and the POI classifier (Haiku) |
+| `OPENAI_API_KEY` | ✅ | Used by onboarding discovery (with web search) and the POI classifier |
+| `OPENAI_STRUCTURED_OUTPUT` | — | `true`/`false` — enables strict JSON-schema output for classification and tourism validation |
 | `GOOGLE_PLACES_API_KEY` | ✅ | Nearby Search + Details API |
 | `GOOGLE_PLACES_ENABLED` | — | `true`/`false` — enables Google enrichment in onboarding |
 | `CACHE_TTL_DAYS` | — | Fetch cache TTL in days (default `30`) |
-| `PIPELINE_LLM_BACKEND` | ✅ | Always `anthropic` |
-| `PIPELINE_LLM_MODEL` | — | Model used by the POI classifier (default `claude-haiku-4-5-20251001`) |
+| `PIPELINE_LLM_BACKEND` | ✅ | LLM provider used by the POI pipeline (default `openai`) |
+| `PIPELINE_LLM_MODEL` | — | Model used by the POI pipeline (default `gpt-5.4-mini`) |
+| `PIPELINE_REASONING_EFFORT` | — | OpenAI reasoning effort used by the POI pipeline (default `none`) |
 | `CLOUDFLARE_R2_ACCESS_KEY_ID` | — | R2 credentials (omit to skip photo upload) |
 | `CLOUDFLARE_R2_SECRET_ACCESS_KEY` | — | |
 | `CLOUDFLARE_R2_ACCOUNT_ID` | — | |
@@ -131,13 +133,12 @@ Backend variables live in `backend/.env`:
 
 ### LLM model reference
 
-| Model | Used for | Web search | Approx. cost |
-|-------|---------|-----------|-------------|
-| `claude-haiku-4-5-20251001` | POI classification pipeline (3-LLM ensemble) | No | $0.80 / M input tokens |
-| `claude-sonnet-4-6` | Onboarding experience discovery | Yes (`web_search_20250305`) | $3 / M input tokens |
-| `claude-opus-4-6` | Optional — swap via `PIPELINE_LLM_MODEL` for highest quality | No | $15 / M input tokens |
+| Model | Used for | Web search |
+|-------|----------|------------|
+| `gpt-5.4-mini` | POI classification pipeline (3-call ensemble) and onboarding experience discovery | Onboarding only |
 
-> `PIPELINE_LLM_MODEL` controls the classifier model only. The onboarding service always uses `claude-sonnet-4-6` with the built-in web search tool.
+> `PIPELINE_LLM_MODEL` controls the POI pipeline model only. The onboarding
+> service uses `gpt-5.4-mini` directly with OpenAI's built-in web search tool.
 
 ---
 
@@ -213,7 +214,7 @@ Password rules: ≥8 chars, at least one uppercase, one lowercase, one digit, on
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/onboarding/experiences?city=...&max_results=10` | — | Curated experiences for a city. Generated once via Claude Sonnet 4.6 with web search, enriched with Google Places, cached for `CACHE_TTL_DAYS`. Subsequent calls hit the cache |
+| `GET` | `/onboarding/experiences?city=...&max_results=10` | — | Curated experiences for a city. Generated once via OpenAI `gpt-5.4-mini` with web search, enriched with Google Places, and cached for `CACHE_TTL_DAYS`. Subsequent calls hit the cache |
 | `POST` | `/onboarding/experiences/choices` | Bearer | Submit selected experience IDs. Computes and saves the user preference vector by averaging the feature vectors of the chosen experiences |
 
 ### Places — `/api/places`
