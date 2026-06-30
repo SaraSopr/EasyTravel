@@ -64,6 +64,10 @@ logger = logging.getLogger(__name__)
 # Waiting (slack) the solver may insert at a node to reach an opening time.
 _SLACK_MAX_S = 4 * 3600
 
+# Post-loop dinner: how many quality-ranked restaurants to try before giving up,
+# skipping over ones whose visit duration doesn't fit the time left before end_dt.
+_DINNER_CANDIDATE_TRIES = 8
+
 
 # ---------------------------------------------------------------------------
 # Prize + time-window helpers (unit-tested)
@@ -437,7 +441,22 @@ def _reorder_day_tsptw(
     # so the result doesn't depend on how many moves fit in the wall-clock window.
     if solution_limit > 0:
         params.solution_limit = solution_limit
-    solution = routing.SolveWithParameters(params)
+
+    # Seed the search with the incoming order so the result is never *worse* than
+    # what we were given. PATH_CHEAPEST_ARC + GLS builds its own first solution and
+    # can converge to a local optimum longer than the multi-vehicle order it
+    # replaced (observed: Madrid couple D2, real-time 71.8→72.1 min). Seeding makes
+    # the incoming order the starting point, so GLS only ever improves on it.
+    # poi_nodes occupy node indices 1..n in input order → that *is* the seed route.
+    # If the incoming order is window-infeasible ReadAssignmentFromRoutes returns
+    # None and we fall back to building a fresh (feasible) solution from scratch.
+    routing.CloseModelWithParameters(params)
+    seed_route = list(range(1, len(poi_nodes) + 1))
+    initial = routing.ReadAssignmentFromRoutes([seed_route], True)
+    if initial is not None:
+        solution = routing.SolveFromAssignmentWithParameters(initial, params)
+    else:
+        solution = routing.SolveWithParameters(params)
     if not solution:
         return ordered
 
@@ -518,6 +537,21 @@ def schedule_day_route(
     lunch_target = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
     dinner_target = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
 
+    # Reserve the dinner slot like the greedy scheduler: pre-estimate the dinner
+    # duration (nearest open meal-grade food at the dinner hour from the depot, by the
+    # scheduler's own resolve_visit_mode) so _add_activity_stop can stop adding
+    # activities before they push past the last feasible dinner start. Without this a
+    # day whose activities run into the evening (e.g. family ends 20:00, last stop
+    # 19:10) leaves no room and drops dinner entirely.
+    _dinner_probe_poi = _nearest_open_food(
+        food_pois, used_food_ids, dinner_target, depot_lat, depot_lng,
+        popularity_scores, meal_only=True, max_price_level=max_food_price_level,
+    ) or _nearest_open_food(
+        food_pois, used_food_ids, dinner_target, depot_lat, depot_lng,
+        popularity_scores, meal_only=False, max_price_level=max_food_price_level,
+    )
+    dinner_reserve_min = resolve_visit_mode(_dinner_probe_poi, 1.0)[1] if _dinner_probe_poi else 0
+
     def _add_food_stop(food_poi: "Poi", forced_arrival: datetime | None = None) -> bool:
         nonlocal cur, cur_lat, cur_lng, cur_id
         if not final_stops:
@@ -544,13 +578,20 @@ def schedule_day_route(
         return True
 
     def _try_insert_meal(target: datetime) -> bool:
+        # Probe restaurant openness at the meal hour, not at ``cur``. When a day's
+        # activities end inside the restaurants' afternoon closing break (e.g. last
+        # stop at 17:19), probing at ``cur`` finds every candidate shut and drops the
+        # meal — exactly how the greedy diverged. The greedy avoids it by pre-selecting
+        # at the meal target hour; ``max(cur, target)`` reproduces that while never
+        # probing earlier than where we actually are.
+        probe = max(cur, target)
         fp = _nearest_open_food(
-            food_pois, used_food_ids, cur, cur_lat, cur_lng, popularity_scores,
+            food_pois, used_food_ids, probe, cur_lat, cur_lng, popularity_scores,
             meal_only=True, max_price_level=max_food_price_level,
         )
         if fp is None:
             fp = _nearest_open_food(
-                food_pois, used_food_ids, cur, cur_lat, cur_lng, popularity_scores,
+                food_pois, used_food_ids, probe, cur_lat, cur_lng, popularity_scores,
                 meal_only=False, max_price_level=max_food_price_level,
             )
         if fp is None:
@@ -588,6 +629,12 @@ def schedule_day_route(
         departure = arrival + timedelta(minutes=vd)
         if departure > end_dt:
             return "full"
+        # Reserve the dinner slot (mirror the greedy guard): if placing this activity
+        # would leave no room for dinner before end_dt (15 min conservative travel),
+        # stop the day here so the post-loop can still insert dinner.
+        if dinner_reserve_min and not dinner_inserted:
+            if departure + timedelta(minutes=15 + dinner_reserve_min) > end_dt:
+                return "full"
         primary = (poi.types or [""])[0]
         cap = _PRIMARY_TYPE_DAY_CAP.get(primary)
         if cap is not None and type_counts.get(primary, 0) >= cap:
@@ -620,23 +667,39 @@ def schedule_day_route(
         if _try_insert_meal(lunch_target):
             lunch_inserted = True
     if activity_count and not dinner_inserted:
-        fp = _nearest_open_food(
-            food_pois, used_food_ids, cur, cur_lat, cur_lng, popularity_scores,
-            meal_only=True, max_price_level=max_food_price_level,
-        ) or _nearest_open_food(
-            food_pois, used_food_ids, cur, cur_lat, cur_lng, popularity_scores,
-            meal_only=False, max_price_level=max_food_price_level,
-        )
-        if fp is not None:
+        # Probe openness at the dinner hour (see _try_insert_meal): a day ending in
+        # the afternoon would otherwise find every restaurant in its closing break.
+        dinner_probe = max(cur, dinner_target)
+        dinner_min_dt = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
+        # Try candidates by quality until one actually fits before end_dt. The best
+        # restaurant may be too long for the time left (e.g. a 90-min place reached at
+        # 20:33 with end_dt 22:00 → 22:03), in which case the clamp would skip it; a
+        # shorter one still fits, so fall through to it instead of dropping dinner.
+        tried: set = set()
+        for _ in range(_DINNER_CANDIDATE_TRIES):
+            fp = _nearest_open_food(
+                food_pois, used_food_ids | tried, dinner_probe, cur_lat, cur_lng,
+                popularity_scores, meal_only=True, max_price_level=max_food_price_level,
+            ) or _nearest_open_food(
+                food_pois, used_food_ids | tried, dinner_probe, cur_lat, cur_lng,
+                popularity_scores, meal_only=False, max_price_level=max_food_price_level,
+            )
+            if fp is None:
+                break
             _, travel_min = _travel(
                 cur_id, cur_lat, cur_lng, fp.id, fp.lat, fp.lng, travel_lookup, walk_threshold_m
             )
             arrival = cur + timedelta(minutes=travel_min)
-            dinner_min_dt = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
-            if arrival < dinner_min_dt and dinner_min_dt + timedelta(minutes=get_food_duration(fp)) <= end_dt:
-                _add_food_stop(fp, forced_arrival=dinner_min_dt)
-            else:
-                _add_food_stop(fp)
+            # Clamp the DINNER_MIN_H floor into [arrival, end_dt − duration] so a short
+            # day gets the latest dinner that still fits. The duration MUST be the one
+            # ``_add_food_stop`` applies (``resolve_visit_mode``): ``get_food_duration``
+            # under-counts food with a ``tourism_duration_minutes`` (e.g. 90 vs 75).
+            _, food_dur, _ = resolve_visit_mode(fp, 1.0)
+            forced = min(max(arrival, dinner_min_dt), end_dt - timedelta(minutes=food_dur))
+            if forced >= arrival:
+                _add_food_stop(fp, forced_arrival=forced)
+                break
+            tried.add(fp.id)  # too long for the time left → try the next-best
 
     return final_stops
 
@@ -843,7 +906,7 @@ async def plan(
     # --- Optional: fill under-filled days by borrowing nearby unused candidates ---
     # With pinning ON each POI is locked to one day, so a sparse/short-visit zone
     # (e.g. a compact city centre) can leave its day ending mid-afternoon while the
-    # other days run full — the forced-18:00 dinner then opens a dead gap. When a
+    # other days run full — the forced-19:00 dinner then opens a dead gap. When a
     # day's scheduled time falls below ``underfull_fill_ratio * budget``, pull extra
     # candidates from the *unused* activity pool near that day's own centroid, pin
     # them to that day, and re-solve. The full days keep their pins, so they stay

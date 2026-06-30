@@ -118,7 +118,8 @@ SPEED_MS: dict[str, float] = {"walking": 1.39, "transit": 5.56, "taxi": 8.33}
 LUNCH_TARGET_H = 13    # 13:00
 DINNER_TARGET_H = 20   # 20:00
 MEAL_WINDOW_MIN = 30   # start looking 30 min before target hour
-DINNER_MIN_H = 18      # post-loop dinner insertion won't fire before this hour
+DINNER_MIN_H = 19      # post-loop dinner insertion won't fire before this hour
+_DINNER_CANDIDATE_TRIES = 8  # post-loop dinner: restaurants to try before giving up
 
 OUTDOOR_VISIT_THRESHOLD = 0.3   # below this cosine similarity → exterior visit only
 MMR_LAMBDA = 0.6                # weight of relevance vs diversity in MMR
@@ -1296,15 +1297,20 @@ def _schedule_day(
         meal_only: bool = False,
         pos_lat: float | None = None,
         pos_lng: float | None = None,
+        exclude: set | None = None,
     ) -> Poi | None:
         """Find the nearest open food POI at time t.
         pos_lat/pos_lng override the Pass-1 current position (used in Pass 3 post-loop).
+        exclude: extra ids to skip (used by the post-loop dinner fallback to try the
+        next-best restaurant after one that does not fit the time left).
         """
         _lat = pos_lat if pos_lat is not None else current_lat
         _lng = pos_lng if pos_lng is not None else current_lng
         eligible: list[tuple[Poi, float]] = []
         for fp in remaining_food:
             if fp.id in used_food:
+                continue
+            if exclude and fp.id in exclude:
                 continue
             if not _is_open(fp, t):
                 continue
@@ -1323,10 +1329,14 @@ def _schedule_day(
         if not lunch_done:
             target = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
             if current >= target - timedelta(minutes=MEAL_WINDOW_MIN):
-                fp = _pick_nearest_open_food(current, meal_only=True)
+                # Probe openness at the meal hour, not at ``current``: if we reach the
+                # window inside the restaurants' afternoon closing break, probing at
+                # ``current`` finds nothing and (below) blocks lunch for the whole day.
+                probe = max(current, target)
+                fp = _pick_nearest_open_food(probe, meal_only=True)
                 if fp is None:
                     logger.warning("No restaurant found for lunch, falling back to any food POI")
-                    fp = _pick_nearest_open_food(current, meal_only=False)
+                    fp = _pick_nearest_open_food(probe, meal_only=False)
                 if fp:
                     used_food.add(fp.id)
                     lunch_poi = fp
@@ -1348,10 +1358,12 @@ def _schedule_day(
         if not dinner_done:
             target = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
             if current >= target - timedelta(minutes=MEAL_WINDOW_MIN):
-                fp = _pick_nearest_open_food(current, meal_only=True)
+                # Probe openness at the meal hour, not at ``current`` (see lunch above).
+                probe = max(current, target)
+                fp = _pick_nearest_open_food(probe, meal_only=True)
                 if fp is None:
                     logger.warning("No restaurant found for dinner, falling back to any food POI")
-                    fp = _pick_nearest_open_food(current, meal_only=False)
+                    fp = _pick_nearest_open_food(probe, meal_only=False)
                 if fp:
                     used_food.add(fp.id)
                     dinner_poi = fp
@@ -1409,8 +1421,11 @@ def _schedule_day(
             logger.warning("Skipping POI %s during scheduling: %s", getattr(ap, "name", "?"), exc)
 
     # Pre-select any meal POI that the activity loop didn't reach (e.g. all activities
-    # finished before 12:30 or 19:30).  Pass 3 post-loop will insert them if there is time.
-    if not lunch_done:
+    # finished before 12:30 or 19:30), AND recover the case where Pass 1 reached the
+    # window but found nothing open at ``current`` (it then set ``*_done=True`` with no
+    # POI). Gating on ``*_poi is None`` rather than ``not *_done`` lets this re-probe at
+    # the proper meal hour instead of leaving the day mealless.
+    if lunch_poi is None:
         lunch_t = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
         fp = _pick_nearest_open_food(lunch_t, meal_only=True)
         if fp is None:
@@ -1419,7 +1434,7 @@ def _schedule_day(
             used_food.add(fp.id)
             lunch_poi = fp
 
-    if not dinner_done:
+    if dinner_poi is None:
         dinner_t = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
         fp = _pick_nearest_open_food(dinner_t, meal_only=True)
         if fp is None:
@@ -1480,7 +1495,14 @@ def _schedule_day(
         cur_lat, cur_lng = food_poi.lat, food_poi.lng
         cur_id = food_poi.id
 
-    def _add_activity_stop(poi: Poi, sim_score: float) -> bool:
+    def _add_activity_stop(poi: Poi, sim_score: float) -> str:
+        """Returns "added" | "skip" (type cap) | "full" (no time / dinner slot).
+
+        The distinction matters: a "skip" (per-day type cap) must let the caller try
+        the NEXT activity, whereas a "full" stops the day. Conflating them (a single
+        bool) made the main loop break on the church cap before noon, so lunch was
+        never inserted in-loop and the day ended mealless.
+        """
         nonlocal cur, cur_lat, cur_lng, cur_id
         if not final_stops:
             travel_min = 0.0
@@ -1494,19 +1516,24 @@ def _schedule_day(
         vm, vd, vn = resolve_visit_mode(poi, sim_score)
         departure = arrival + timedelta(minutes=vd)
         if departure > end_dt:
-            return False
+            return "full"
         # Protect the dinner slot: don't add an activity if dinner can no longer
-        # fit before end_dt after it (15 min conservative travel estimate).
+        # fit before end_dt after it (15 min conservative travel estimate). Use the
+        # duration ``_add_food_stop`` actually applies (``resolve_visit_mode``), not
+        # ``get_food_duration`` — they disagree when a food POI has a
+        # ``tourism_duration_minutes`` (e.g. 90 vs 75), which under-reserves the slot
+        # and lets a late activity squeeze dinner out.
         if dinner_poi and not dinner_inserted:
-            dinner_end_est = departure + timedelta(minutes=15 + get_food_duration(dinner_poi))
+            _, _dinner_dur, _ = resolve_visit_mode(dinner_poi, 1.0)
+            dinner_end_est = departure + timedelta(minutes=15 + _dinner_dur)
             if dinner_end_est > end_dt:
-                return False
+                return "full"
         # Per-day type cap: avoid church/type fatigue.
         primary = (poi.types or [""])[0]
         cap = _PRIMARY_TYPE_DAY_CAP.get(primary)
         if cap is not None and type_counts.get(primary, 0) >= cap:
             logger.debug("Skipping %s (type '%s' cap %d reached)", poi.name, primary, cap)
-            return False
+            return "skip"
         final_stops.append(_Stop(
             poi=poi,
             arrival=arrival,
@@ -1522,7 +1549,7 @@ def _schedule_day(
         cur = departure
         cur_lat, cur_lng = poi.lat, poi.lng
         cur_id = poi.id
-        return True
+        return "added"
 
     lunch_target = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
     dinner_target = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
@@ -1540,8 +1567,9 @@ def _schedule_day(
                 _add_food_stop(dinner_poi)
                 dinner_inserted = True
 
-        if not _add_activity_stop(act, sim_score):
+        if _add_activity_stop(act, sim_score) == "full":
             break  # day is full
+        # "skip" (per-day type cap) → keep scanning so meals still get their in-loop slot
 
     # --- Refill: the TSP reorder usually shortens total travel vs the Pass-1
     # path, so time often frees up at the tail. Try to insert activities Pass-1
@@ -1560,7 +1588,7 @@ def _schedule_day(
         )
         if not _is_open(ap, cur + timedelta(minutes=refill_travel)):
             continue
-        if _add_activity_stop(ap, sim_score):
+        if _add_activity_stop(ap, sim_score) == "added":
             used_activity.add(ap.id)
             logger.info("Refill: added %s after TSP freed up time", ap.name)
 
@@ -1582,28 +1610,42 @@ def _schedule_day(
             logger.warning("Lunch not inserted for day %s — no time slot available", day_date.date())
 
     if has_activities and dinner_poi and not dinner_inserted:
-        _, travel_min = _travel(
-            cur_id, cur_lat, cur_lng, dinner_poi.id, dinner_poi.lat, dinner_poi.lng,
-            travel_lookup, walk_threshold_m,
-        )
-        arrival = cur + timedelta(minutes=travel_min)
         dinner_min_dt = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
-        if arrival < dinner_min_dt:
-            # Safety net: force dinner at DINNER_MIN_H if it fits before end_dt
-            forced = dinner_min_dt
-            if forced + timedelta(minutes=get_food_duration(dinner_poi)) <= end_dt:
-                _add_food_stop(dinner_poi, forced_arrival=forced)
+        # Try the pre-selected dinner; if it is too long for the time left, fall through
+        # to the next-best open restaurant that fits (mirrors the TOPTW post-pass) rather
+        # than dropping the meal. Place dinner at the DINNER_MIN_H floor when we'd arrive
+        # earlier, clamped so it never overflows end_dt: forced = clamp into
+        # [arrival, end_dt − duration]. The duration MUST match what ``_add_food_stop``
+        # applies (``resolve_visit_mode``): ``get_food_duration`` under-counts some food
+        # types (e.g. La Gattabuia: 75 vs 90), which would overflow end_dt and drop the meal.
+        tried: set = set()
+        candidate: Poi | None = dinner_poi
+        for _ in range(_DINNER_CANDIDATE_TRIES):
+            if candidate is None:
+                break
+            _, travel_min = _travel(
+                cur_id, cur_lat, cur_lng, candidate.id, candidate.lat, candidate.lng,
+                travel_lookup, walk_threshold_m,
+            )
+            arrival = cur + timedelta(minutes=travel_min)
+            _, food_dur, _ = resolve_visit_mode(candidate, 1.0)
+            forced = min(max(arrival, dinner_min_dt), end_dt - timedelta(minutes=food_dur))
+            if forced >= arrival:
+                _add_food_stop(candidate, forced_arrival=forced)
                 dinner_inserted = True
                 logger.info(
-                    "Dinner force-inserted at %s for day %s",
-                    forced.strftime("%H:%M"), day_date.date(),
+                    "Dinner inserted at %s for day %s", forced.strftime("%H:%M"), day_date.date(),
                 )
-            else:
-                logger.warning("Dinner not inserted for day %s — no time slot available", day_date.date())
-        elif arrival + timedelta(minutes=get_food_duration(dinner_poi)) <= end_dt:
-            _add_food_stop(dinner_poi)
-            dinner_inserted = True
-        else:
+                break
+            tried.add(candidate.id)  # too long for the time left → try the next-best
+            candidate = _pick_nearest_open_food(
+                max(cur, dinner_target), meal_only=True,
+                pos_lat=cur_lat, pos_lng=cur_lng, exclude=tried,
+            ) or _pick_nearest_open_food(
+                max(cur, dinner_target), meal_only=False,
+                pos_lat=cur_lat, pos_lng=cur_lng, exclude=tried,
+            )
+        if not dinner_inserted:
             logger.warning("Dinner not inserted for day %s — no time slot available", day_date.date())
 
     # Collect food that was pre-selected but never inserted (reserved to avoid reuse next day)
@@ -1876,7 +1918,6 @@ async def generate(
     all_days: list[list[_Stop]] = []
     used_food_ids: set = set()
     global_deferred: list[tuple[Poi, float]] = []  # (poi, cosine_sim_score)
-    had_closed_pois = False
 
     for day_idx, cluster_id in enumerate(sorted(clusters.keys())):
         day_date = today + timedelta(days=day_idx)
@@ -1973,7 +2014,6 @@ async def generate(
         )
 
         if deferred:
-            had_closed_pois = True
             global_deferred.extend(deferred)
 
         # Mark food as used: both inserted stops and pre-selected-but-uninserted
@@ -1995,9 +2035,6 @@ async def generate(
             )
 
         all_days.append(stops)
-
-    if had_closed_pois:
-        warnings.append("Some POIs could not be scheduled due to opening hours.")
 
     elapsed_ms = int((_time_mod.monotonic() - t0) * 1000)
     total_scheduled = sum(len(d) for d in all_days)
