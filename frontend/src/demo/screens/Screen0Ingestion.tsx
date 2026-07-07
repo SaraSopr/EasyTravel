@@ -239,26 +239,26 @@ export default function Screen0Ingestion() {
     )
   }
 
+  if (!ingestion || ingestionLoading) {
+    return <div className="demo-loading"><div className="spinner" />Loading ingestion data…</div>
+  }
+
   return (
     <div className="screen-layout">
       {/* Map */}
       <div className="demo-map-wrap">
-        {ingestion && !ingestionLoading ? (
-          <DemoMap
-            centerLat={ingestion.city.center[0]}
-            centerLng={ingestion.city.center[1]}
-            bounds={ingestion.city.bounds}
-            pois={mapPois}
-            excludedIds={stepIdx === 1 ? discardedIds : undefined}
-            poiColors={stepIdx >= 2 ? categoryColors : undefined}
-            selectedIds={stepIdx === 3 ? withHoursIds : undefined}
-            techMode={techMode}
-            minimalPopup
-            showFoodDescription={false}
-          />
-        ) : (
-          <div className="demo-loading"><div className="spinner" />Loading ingestion data…</div>
-        )}
+        <DemoMap
+          centerLat={ingestion.city.center[0]}
+          centerLng={ingestion.city.center[1]}
+          bounds={ingestion.city.bounds}
+          pois={mapPois}
+          excludedIds={stepIdx === 1 ? discardedIds : undefined}
+          poiColors={stepIdx >= 2 ? categoryColors : undefined}
+          selectedIds={stepIdx === 3 ? withHoursIds : undefined}
+          techMode={techMode}
+          minimalPopup
+          showFoodDescription={false}
+        />
       </div>
 
       {/* Side panel */}

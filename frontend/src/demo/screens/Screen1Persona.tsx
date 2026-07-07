@@ -16,26 +16,28 @@ export default function Screen1Persona() {
   const caption = `Every place the system knows in ${trace?.city.name ?? city}, already weighted by how much they match this traveler.`
   const techCaption = `Prize ρᵢ = ${wSim}·cos(vᵢ, u) + ${wPop}·popularity + ${landmarkBoost}·landmark. Persona vector: [${Object.values(selected.vector).map(v => v.toFixed(1)).join(', ')}].`
 
+  if (pois.length === 0) {
+    return (
+      <div className="demo-loading">
+        <div className="spinner" />
+        Loading map…
+      </div>
+    )
+  }
+
   return (
     <div className="screen-layout">
       {/* Map */}
       <div className="demo-map-wrap">
-        {pois.length > 0 ? (
-          <DemoMap
-            centerLat={trace?.city.center[0] ?? 41.9}
-            centerLng={trace?.city.center[1] ?? 12.48}
-            bounds={bounds}
-            pois={pois}
-            techMode={techMode}
-            showFoodDescription={false}
-            prizeParams={trace?.params}
-          />
-        ) : (
-          <div className="demo-loading">
-            <div className="spinner" />
-            Loading map…
-          </div>
-        )}
+        <DemoMap
+          centerLat={trace?.city.center[0] ?? 41.9}
+          centerLng={trace?.city.center[1] ?? 12.48}
+          bounds={bounds}
+          pois={pois}
+          techMode={techMode}
+          showFoodDescription={false}
+          prizeParams={trace?.params}
+        />
       </div>
 
       {/* Side panel */}

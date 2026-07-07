@@ -840,6 +840,12 @@ async def plan(
     if not candidates:
         return [], ["No activity candidates available for this city."]
 
+    if trace is not None:
+        # Snapshot the global top-N here, before pre-clustering rebuilds/prunes
+        # the list below — the demo's "select candidates" step must show the
+        # top-N the caption claims. The kept set is recoverable from "zones".
+        trace["candidates"] = [str(c[0].id) for c in candidates]
+
     # --- Geographic pre-clustering: pin each POI to one day's cluster ---
     # Keeps every day spatially compact, at the cost of the solver's freedom to
     # rebalance prize across days. With far outliers already removed by the activity-
@@ -956,7 +962,6 @@ async def plan(
             trace["balance"] = round(balance, 3)
 
     if trace is not None:
-        trace["candidates"] = [str(c[0].id) for c in candidates]
         trace["pre_cluster_active"] = day_assignment is not None
 
     # Depots default to the city center.

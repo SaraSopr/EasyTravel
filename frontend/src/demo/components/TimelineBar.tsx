@@ -18,6 +18,7 @@ interface Segment {
   startMin: number
   widthMin: number
   label?: string
+  poiId?: string
 }
 
 interface Props {
@@ -30,6 +31,7 @@ interface Props {
   daySpan?: [number, number]
   /** Tight padding for stacked multi-day lists (comparison screen). */
   compact?: boolean
+  onPoiClick?: (poiId: string) => void
 }
 
 function buildSegments(
@@ -70,6 +72,7 @@ function buildSegments(
       startMin: arrival,
       widthMin: depart - arrival,
       label: poi?.name ?? '',
+      poiId,
     })
     prev = depart
   }
@@ -86,7 +89,7 @@ function buildSegments(
 
 export default function TimelineBar({
   day, pois, useReplay = false, animate = false, dayIdx = 0,
-  showLegend = true, daySpan, compact = false,
+  showLegend = true, daySpan, compact = false, onPoiClick,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [DAY_START, DAY_END] = daySpan ?? [DEFAULT_DAY_START, DEFAULT_DAY_END]
@@ -186,6 +189,7 @@ export default function TimelineBar({
           {segments.map((seg, i) => {
             const leftPct = ((seg.startMin - DAY_START) / totalWidth) * 100
             const widthPct = (seg.widthMin / totalWidth) * 100
+            const clickable = (seg.kind === 'visit' || seg.kind === 'meal') && !!seg.poiId && !!onPoiClick
             return (
               <div
                 key={i}
@@ -195,9 +199,11 @@ export default function TimelineBar({
                   left: `${leftPct}%`,
                   width: `${widthPct}%`,
                   top: 0, bottom: 0,
+                  cursor: clickable ? 'pointer' : undefined,
                   ...(seg.kind === 'visit' ? { background: visitColor } : {}),
                 }}
                 title={seg.label ? `${seg.label} (${minToLabel(seg.startMin)}–${minToLabel(seg.startMin + seg.widthMin)})` : seg.kind}
+                onClick={clickable ? () => onPoiClick!(seg.poiId!) : undefined}
               >
                 {seg.widthMin > 25 && seg.label && (
                   <span className="timeline-segment-label">

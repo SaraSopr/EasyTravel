@@ -123,13 +123,15 @@ class CanvasPOILayer extends L.Layer {
     this._canvas = canvas
     const pane = map.getPane('overlayPane')
     if (pane) pane.appendChild(canvas)
-    map.on('moveend zoomend resize', this._redraw, this)
+    // 'move'/'zoom' fire on every frame of a flyTo: without a per-frame
+    // redraw the dots detach from the tiles for the whole flight.
+    map.on('move zoom moveend zoomend resize', this._redraw, this)
     this._resize(map)
     return this
   }
 
   onRemove(map: LeafletMap) {
-    map.off('moveend zoomend resize', this._redraw, this)
+    map.off('move zoom moveend zoomend resize', this._redraw, this)
     if (this._canvas) this._canvas.remove()
     this._canvas = null
     return this
@@ -138,8 +140,10 @@ class CanvasPOILayer extends L.Layer {
   private _resize(map: LeafletMap) {
     if (!this._canvas) return
     const size = map.getSize()
-    this._canvas.width = size.x
-    this._canvas.height = size.y
+    // Assigning width/height reallocates the buffer even when unchanged —
+    // too costly now that redraws run on every animation frame.
+    if (this._canvas.width !== size.x) this._canvas.width = size.x
+    if (this._canvas.height !== size.y) this._canvas.height = size.y
     L.DomUtil.setPosition(
       this._canvas,
       map.containerPointToLayerPoint([0, 0]),
@@ -569,15 +573,27 @@ export default function DemoMap({
     ))
   }, [pois])
 
-  useEffect(() => {
-    if (!focusPoiId) return
-    const poi = pois.find(candidate => candidate.id === focusPoiId)
-    if (poi) setSelectedPoi(poi)
-  }, [focusPoiId, focusRequest, pois])
+  // No popup may be open while FocusPoi flies: an open popup's autoPan snaps
+  // the map when the offset exceeds the viewport, and keepInView drags it back
+  // toward the old POI on landing. Close on takeoff, open on arrival.
+  const closePopup = useCallback(() => setSelectedPoi(null), [])
+  const openFocusedPopup = useCallback((poi: DemoPoi) => {
+    setSelectedPoi(poi)
+  }, [])
 
   const focusedPoi = focusPoiId
     ? pois.find(poi => poi.id === focusPoiId)
     : undefined
+  // Legend counts only still-eligible markers: POIs the cleanup animation has
+  // already struck out (or externally excluded ones) stop counting, so the
+  // numbers converge to the pool the following screens start from.
+  const eligiblePois = pois.filter(poi => (
+    !excludedIds?.has(poi.id)
+    && getFilterReason(poi.id, filtering, filterPhase) === undefined
+  ))
+  const legendFoodCount = eligiblePois.filter(
+    poi => poi.isFood ?? poi.category === 'food',
+  ).length
   const visibleRouteLegs = routePolylines?.flatMap(route => route.legs ?? [])
     ?? routeLegs
     ?? []
@@ -701,8 +717,8 @@ export default function DemoMap({
         <LandmarkLegend
           showLandmark={pois.some(poi => poi.landmark)}
           showFood={pois.some(poi => poi.isFood ?? poi.category === 'food')}
-          totalCount={pois.length}
-          foodCount={pois.filter(poi => poi.isFood ?? poi.category === 'food').length}
+          totalCount={eligiblePois.length}
+          foodCount={legendFoodCount}
           showFoodDescription={showFoodDescription}
           techMode={techMode}
           prizeParams={prizeParams}
@@ -710,7 +726,14 @@ export default function DemoMap({
       )}
       <InvalidateOnResize />
       {bounds && <FitBoundsOnce key={bounds.flat().join(',')} bounds={bounds} />}
-      {focusedPoi && <FocusPoi poi={focusedPoi} request={focusRequest} />}
+      {focusedPoi && (
+        <FocusPoi
+          poi={focusedPoi}
+          request={focusRequest}
+          onFlightStart={closePopup}
+          onSettled={openFocusedPopup}
+        />
+      )}
     </MapContainer>
   )
 }
@@ -751,16 +774,39 @@ function TransportLegend({
   )
 }
 
-function FocusPoi({ poi, request }: { poi: DemoPoi; request: number }) {
+function FocusPoi({ poi, request, onFlightStart, onSettled }: {
+  poi: DemoPoi
+  request: number
+  onFlightStart: () => void
+  onSettled: (poi: DemoPoi) => void
+}) {
   const map = useMap()
 
   useEffect(() => {
+    // A popup must never be open mid-flight (autoPan snaps, keepInView drags
+    // the map back), and the new one opens only once the fly lands.
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      onSettled(poi)
+    }
+    onFlightStart()
     map.flyTo(
       [poi.lat, poi.lng],
       Math.max(map.getZoom(), 16),
       { duration: 0.55 },
     )
-  }, [map, poi, request])
+    // Listen only after flyTo: its internal stop() of a running pan animation
+    // fires a synchronous moveend that would open the popup immediately.
+    map.once('moveend', settle)
+    // Fallback in case the map is already at the target and never moves.
+    const timer = window.setTimeout(settle, 800)
+    return () => {
+      map.off('moveend', settle)
+      window.clearTimeout(timer)
+    }
+  }, [map, poi, request, onFlightStart, onSettled])
 
   return null
 }
@@ -784,15 +830,19 @@ function LandmarkLegend({
 }) {
   return (
     <aside className="landmark-legend" aria-label="Map marker legend">
+      {/* Activities and food are counted separately so the numbers stay
+          comparable across screens that intentionally hide food markers. */}
       <div className="map-legend-counts">
         <div>
-          <strong>{totalCount}</strong>
-          <span>Map points</span>
+          <strong>{totalCount - foodCount}</strong>
+          <span>Activities</span>
         </div>
-        <div>
-          <strong>{foodCount}</strong>
-          <span>Food</span>
-        </div>
+        {foodCount > 0 && (
+          <div>
+            <strong>{foodCount}</strong>
+            <span>Food</span>
+          </div>
+        )}
       </div>
       {showLandmark && (
         <div className="map-legend-row">

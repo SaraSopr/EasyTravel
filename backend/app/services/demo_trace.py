@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Schema version of the trace payload. Bump whenever the JSON shape consumed by
 # the frontend changes, then regenerate the baked traces
 # (scripts/generate_demo_traces.py) — the frontend refuses older baked files.
-TRACE_VERSION = 2
+TRACE_VERSION = 3
 
 # ---------------------------------------------------------------------------
 # Persona definitions

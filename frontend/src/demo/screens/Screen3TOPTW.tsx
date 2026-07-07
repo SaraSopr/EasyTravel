@@ -168,9 +168,18 @@ export default function Screen3TOPTW() {
   const dayData = toptw?.days?.[selectedDay]
   const preReorderRoute = dayData?.preReorderRoute
 
-  // Candidates stay highlighted through the zone/solve steps: the rest of the
-  // pool dims so the day-zones read against the discarded candidates.
-  const selectedIds = stepIdx <= 2 ? candidateSet : undefined
+  // Step 0 highlights the solver's global top-N. From the zone step onward only
+  // the candidates that survived the per-zone rebuild and outlier pruning stay
+  // lit (the zones keys), so the dropped ones visibly fade back into the pool.
+  const zoneSet = useMemo(() => {
+    const keys = Object.keys(toptw?.zones ?? {})
+    return keys.length > 0 ? new Set(keys) : undefined
+  }, [toptw?.zones])
+  const selectedIds = stepIdx === 0
+    ? candidateSet
+    : stepIdx <= 2
+      ? (zoneSet ?? candidateSet)
+      : undefined
 
   const routeForStops = (stops: ToptwDay['stops']) =>
     stops.map(stop => stop.poiId)
@@ -266,30 +275,30 @@ export default function Screen3TOPTW() {
     if (expanded) toggleExpanded()
   }
 
+  if (pois.length === 0) {
+    return <div className="demo-loading"><div className="spinner" />Loading…</div>
+  }
+
   return (
     <div className="screen-layout">
       {/* Map — hidden when lane board is fullscreen */}
       {!expanded && (
         <div className="demo-map-wrap">
-          {pois.length > 0 ? (
-            <DemoMap
-              centerLat={trace?.city.center[0] ?? 41.9}
-              centerLng={trace?.city.center[1] ?? 12.48}
-              bounds={mapBounds}
-              pois={visibleMapPois}
-              clusters={zones}
-              selectedIds={selectedIds}
-              routePolylines={stepIdx >= 3 ? displayedRoutes : undefined}
-              showRoute={stepIdx >= 3}
-              routeDayIdx={selectedDay}
-              focusPoiId={mapFocus?.poiId}
-              focusRequest={mapFocus?.request}
-              techMode={techMode}
-              prizeParams={trace?.params}
-            />
-          ) : (
-            <div className="demo-loading"><div className="spinner" />Loading…</div>
-          )}
+          <DemoMap
+            centerLat={trace?.city.center[0] ?? 41.9}
+            centerLng={trace?.city.center[1] ?? 12.48}
+            bounds={mapBounds}
+            pois={visibleMapPois}
+            clusters={zones}
+            selectedIds={selectedIds}
+            routePolylines={stepIdx >= 3 ? displayedRoutes : undefined}
+            showRoute={stepIdx >= 3}
+            routeDayIdx={selectedDay}
+            focusPoiId={mapFocus?.poiId}
+            focusRequest={mapFocus?.request}
+            techMode={techMode}
+            prizeParams={trace?.params}
+          />
         </div>
       )}
 

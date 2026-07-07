@@ -263,6 +263,62 @@ function RealismAuditSummary({
   )
 }
 
+function travelMinutesOf(stops: { travelMinutesFromPrevious?: number | null }[]): number {
+  return stops.reduce((total, stop) => total + (stop.travelMinutesFromPrevious ?? 0), 0)
+}
+
+function AllDaysRealismSummary({ days }: { days: GreedyDay[] }) {
+  const plannedTravelMin = days.reduce((total, day) => total + travelMinutesOf(day.stops), 0)
+  const replayTravelMin = days.reduce((total, day) => total + travelMinutesOf(day.replayReal.stops), 0)
+  const travelDelta = replayTravelMin - plannedTravelMin
+  const travelDeltaPct = plannedTravelMin > 0 ? (travelDelta / plannedTravelMin) * 100 : 0
+  const overrunDays = days.filter(day => day.replayReal.overrunMin > 0).length
+  const totalOverrunMin = days.reduce((total, day) => total + day.replayReal.overrunMin, 0)
+  const signed = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(1)}`
+
+  return (
+    <div className="realism-audit">
+      <div className="realism-audit-badge">Evaluation only</div>
+      <div className="realism-audit-title">All-day feasibility replay</div>
+      <div className="realism-model-flow">
+        <div className="haversine">
+          <span>Built with</span>
+          <strong>Haversine</strong>
+          <b>{plannedTravelMin.toFixed(1)} min travel</b>
+        </div>
+        <div className="realism-model-arrow" aria-hidden="true">→</div>
+        <div className="network">
+          <span>Evaluated with</span>
+          <strong>Network matrix</strong>
+          <b>{replayTravelMin.toFixed(1)} min travel</b>
+        </div>
+        <div className={`realism-model-delta ${travelDelta > 0 ? 'slower' : 'faster'}`}>
+          <span>Travel delta</span>
+          <strong>{signed(travelDelta)} min</strong>
+          <b>{signed(travelDeltaPct)}%</b>
+        </div>
+      </div>
+      <div className="realism-audit-grid">
+        <div>
+          <span>Days audited</span>
+          <strong>{days.length}</strong>
+        </div>
+        <div className={overrunDays > 0 ? 'warning' : 'safe'}>
+          <span>Overrun days</span>
+          <strong>{overrunDays}/{days.length}</strong>
+        </div>
+        <div className={totalOverrunMin > 0 ? 'warning' : 'safe'}>
+          <span>Total overrun</span>
+          <strong>+{totalOverrunMin} min</strong>
+        </div>
+      </div>
+      <div className="realism-audit-method">
+        Select a day for the full Haversine vs. replay breakdown.
+      </div>
+    </div>
+  )
+}
+
 export default function Screen2Greedy() {
   const {
     stepIdx, selectedDay, setSelectedDay, city, trace, techMode,
@@ -309,7 +365,7 @@ export default function Screen2Greedy() {
   useEffect(() => {
     if (stepIdx !== 4) return
     setSelectedDay(0)
-    setShowAllDays(false)
+    setShowAllDays(true)
   }, [setSelectedDay, stepIdx, trace?.persona.id])
 
   const finalPoiIds = useMemo(() => new Set([
@@ -464,32 +520,32 @@ export default function Screen2Greedy() {
     if (expanded) toggleExpanded()
   }
 
+  if (pois.length === 0) {
+    return <div className="demo-loading"><div className="spinner" />Loading…</div>
+  }
+
   return (
     <div className="screen-layout">
       {/* Map */}
       <div className="demo-map-wrap">
-        {pois.length > 0 ? (
-          <DemoMap
-            centerLat={trace?.city.center[0] ?? 41.9}
-            centerLng={trace?.city.center[1] ?? 12.48}
-            bounds={bounds}
-            pois={visibleMapPois}
-            clusters={clusters}
-            filtering={stepIdx === 0 ? preprocessing : undefined}
-            filterPhase={filterPhase}
-            softenFoodMarkers={stepIdx === 1}
-            selectedIds={selectedSet}
-            routePolylines={showRoute ? displayedRoutes : undefined}
-            showRoute={showRoute}
-            routeDayIdx={selectedDay}
-            focusPoiId={mapFocus?.poiId}
-            focusRequest={mapFocus?.request}
-            techMode={techMode}
-            prizeParams={trace?.params}
-          />
-        ) : (
-          <div className="demo-loading"><div className="spinner" />Loading…</div>
-        )}
+        <DemoMap
+          centerLat={trace?.city.center[0] ?? 41.9}
+          centerLng={trace?.city.center[1] ?? 12.48}
+          bounds={bounds}
+          pois={visibleMapPois}
+          clusters={clusters}
+          filtering={stepIdx === 0 ? preprocessing : undefined}
+          filterPhase={filterPhase}
+          softenFoodMarkers={stepIdx === 1}
+          selectedIds={selectedSet}
+          routePolylines={showRoute ? displayedRoutes : undefined}
+          showRoute={showRoute}
+          routeDayIdx={selectedDay}
+          focusPoiId={mapFocus?.poiId}
+          focusRequest={mapFocus?.request}
+          techMode={techMode}
+          prizeParams={trace?.params}
+        />
       </div>
 
       {/* Side panel */}
@@ -509,7 +565,7 @@ export default function Screen2Greedy() {
             view under the taller cards (same order as the TOPTW screen) */}
         {stepIdx >= 3 && numDays > 1 && (
           <div className="day-tabs">
-            {stepIdx === 3 && (
+            {(stepIdx === 3 || stepIdx === 4) && (
               <button
                 className={`day-tab ${showAllDays ? 'active' : ''}`}
                 onClick={() => setShowAllDays(true)}
@@ -554,12 +610,16 @@ export default function Screen2Greedy() {
           />
         )}
 
-        {stepIdx === 4 && dayData && (
-          <RealismAuditSummary
-            day={dayData}
-            dayIdx={selectedDay}
-            dayStartMin={trace?.daySpan?.[0] ?? 540}
-          />
+        {stepIdx === 4 && (
+          showAllDays
+            ? greedy?.days && <AllDaysRealismSummary days={greedy.days} />
+            : dayData && (
+              <RealismAuditSummary
+                day={dayData}
+                dayIdx={selectedDay}
+                dayStartMin={trace?.daySpan?.[0] ?? 540}
+              />
+            )
         )}
 
         {/* Step 2: cluster legend */}
@@ -616,57 +676,100 @@ export default function Screen2Greedy() {
       )}
 
       {/* Step 5: thesis-aligned network feasibility replay */}
-      {stepIdx === 4 && dayData && (
-        <div className="demo-bottom realism-audit-timelines">
-          <div className="realism-timeline-row">
-            <div className="realism-timeline-label">
-              Planned
-              <span>Haversine estimates</span>
-            </div>
-            <TimelineBar
-              day={dayData}
-              pois={pois}
-              daySpan={trace?.daySpan}
-              useReplay={false}
-              dayIdx={selectedDay}
-              showLegend={false}
-            />
-          </div>
-          <div className="realism-timeline-row">
-            <div className="realism-timeline-label replay">
-              Real replay
-              <span>routing cache</span>
-              <strong className={`realism-travel-delta ${replayTravelDelta > 0 ? 'slower' : 'faster'}`}>
-                {replayTravelDelta >= 0 ? '+' : ''}{replayTravelDelta.toFixed(1)} min travel
-              </strong>
-              {dayData.replayReal.overrunMin > 0 && (
-                <strong className="realism-overrun">
-                  +{dayData.replayReal.overrunMin} min overrun
-                </strong>
-              )}
-            </div>
-            <TimelineBar
-              day={dayData}
-              pois={pois}
-              daySpan={trace?.daySpan}
-              useReplay={showReplay}
-              animate
-              dayIdx={selectedDay}
-              showLegend={false}
-            />
-          </div>
-          <div className="realism-shared-legend">
-            <span><i className="visit" style={{
-              background: DAY_COLORS[selectedDay % DAY_COLORS.length].main,
-            }} />Activity</span>
-            <span><i className="meal" />Meal</span>
-            <span><i className="travel" />Travel</span>
-            <span><i className="idle" />Idle</span>
-            {dayData.replayReal.overrunMin > 0 && (
-              <span><i className="overrun" />Overrun</span>
-            )}
-            <em>Same stops and visit durations — only travel times change</em>
-          </div>
+      {stepIdx === 4 && greedy?.days && (
+        <div className={`demo-bottom realism-audit-timelines ${showAllDays ? 'all-days' : ''}`}>
+          {showAllDays ? (
+            <>
+              {greedy.days.map((day, dayIdx) => {
+                const delta = travelMinutesOf(day.replayReal.stops) - travelMinutesOf(day.stops)
+                return (
+                  <div className="realism-timeline-row compact" key={dayIdx}>
+                    <div className="realism-timeline-label replay">
+                      Day {dayIdx + 1}
+                      <strong className={`realism-travel-delta ${delta > 0 ? 'slower' : 'faster'}`}>
+                        {delta >= 0 ? '+' : ''}{delta.toFixed(1)} min
+                      </strong>
+                      {day.replayReal.overrunMin > 0 && (
+                        <strong className="realism-overrun">+{day.replayReal.overrunMin}m over</strong>
+                      )}
+                    </div>
+                    <TimelineBar
+                      day={day}
+                      pois={pois}
+                      daySpan={trace?.daySpan}
+                      useReplay
+                      animate
+                      dayIdx={dayIdx}
+                      showLegend={false}
+                      compact
+                      onPoiClick={poiId => focusScheduledPoi(poiId, dayIdx)}
+                    />
+                  </div>
+                )
+              })}
+              <div className="realism-shared-legend">
+                <span><i className="meal" />Meal</span>
+                <span><i className="travel" />Travel</span>
+                <span><i className="idle" />Idle</span>
+                {greedy.days.some(day => day.replayReal.overrunMin > 0) && (
+                  <span><i className="overrun" />Overrun</span>
+                )}
+                <em>Real replay per day · pick a day for the Haversine comparison</em>
+              </div>
+            </>
+          ) : dayData && (
+            <>
+              <div className="realism-timeline-row">
+                <div className="realism-timeline-label">
+                  Planned
+                  <span>Haversine estimates</span>
+                </div>
+                <TimelineBar
+                  day={dayData}
+                  pois={pois}
+                  daySpan={trace?.daySpan}
+                  useReplay={false}
+                  dayIdx={selectedDay}
+                  showLegend={false}
+                />
+              </div>
+              <div className="realism-timeline-row">
+                <div className="realism-timeline-label replay">
+                  Real replay
+                  <span>routing cache</span>
+                  <strong className={`realism-travel-delta ${replayTravelDelta > 0 ? 'slower' : 'faster'}`}>
+                    {replayTravelDelta >= 0 ? '+' : ''}{replayTravelDelta.toFixed(1)} min travel
+                  </strong>
+                  {dayData.replayReal.overrunMin > 0 && (
+                    <strong className="realism-overrun">
+                      +{dayData.replayReal.overrunMin} min overrun
+                    </strong>
+                  )}
+                </div>
+                <TimelineBar
+                  day={dayData}
+                  pois={pois}
+                  daySpan={trace?.daySpan}
+                  useReplay={showReplay}
+                  animate
+                  dayIdx={selectedDay}
+                  showLegend={false}
+                />
+              </div>
+              <div className="realism-shared-legend">
+                <span><i className="visit" style={{
+                  background: DAY_COLORS[selectedDay % DAY_COLORS.length].main,
+                }} />Activity</span>
+                <span><i className="meal" />Meal</span>
+                <span><i className="travel" />Travel</span>
+                <span><i className="idle" />Idle</span>
+                {dayData.replayReal.overrunMin > 0 && (
+                  <span><i className="overrun" />Overrun</span>
+                )}
+                <em>Same stops and visit durations — only travel times change</em>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

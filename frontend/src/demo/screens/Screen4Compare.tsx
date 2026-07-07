@@ -72,6 +72,15 @@ export default function Screen4Compare() {
   }, [personaId])
   const activeDay = selectedDay != null && selectedDay < numDays ? selectedDay : null
 
+  // Clicking a timeline segment focuses that POI on its own map (each solver
+  // has an independent map, so each needs its own focus request counter).
+  const [greedyFocus, setGreedyFocus] = useState<{ poiId: string; request: number } | null>(null)
+  const [toptwFocus, setToptwFocus] = useState<{ poiId: string; request: number } | null>(null)
+  const focusGreedyPoi = (poiId: string) =>
+    setGreedyFocus(previous => ({ poiId, request: (previous?.request ?? 0) + 1 }))
+  const focusToptwPoi = (poiId: string) =>
+    setToptwFocus(previous => ({ poiId, request: (previous?.request ?? 0) + 1 }))
+
   // Keep each day's original index so colors stay stable under the day filter.
   const visibleDays = <T,>(days: T[] | undefined) =>
     (days ?? [])
@@ -239,6 +248,8 @@ export default function Screen4Compare() {
                 showLegend={false}
                 techMode={techMode}
                 prizeParams={trace.params}
+                focusPoiId={greedyFocus?.poiId}
+                focusRequest={greedyFocus?.request}
               />
             </div>
           </div>
@@ -267,6 +278,8 @@ export default function Screen4Compare() {
                 showLegend={false}
                 techMode={techMode}
                 prizeParams={trace.params}
+                focusPoiId={toptwFocus?.poiId}
+                focusRequest={toptwFocus?.request}
               />
             </div>
           </div>
@@ -303,6 +316,7 @@ export default function Screen4Compare() {
                     dayIdx={dayIdx}
                     showLegend={false}
                     compact={expanded == null}
+                    onPoiClick={focusGreedyPoi}
                   />
                 </div>
               </div>
@@ -341,6 +355,7 @@ export default function Screen4Compare() {
                     dayIdx={dayIdx}
                     showLegend={false}
                     compact={expanded == null}
+                    onPoiClick={focusToptwPoi}
                   />
                 </div>
               </div>

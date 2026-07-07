@@ -945,6 +945,20 @@
   padding: 5px 12px 8px;
 }
 
+.realism-audit-timelines.all-days {
+  height: auto;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.realism-timeline-row.compact {
+  min-height: 52px;
+}
+
+.realism-timeline-row.compact .realism-timeline-label {
+  font-size: 0.8rem;
+}
+
 .realism-timeline-row {
   position: relative;
   display: grid;
