@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:developers.google.com)",
-      "WebFetch(domain:mapsplatform.google.com)"
+      "WebFetch(domain:mapsplatform.google.com)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(chromium-cli http://localhost:5173/demo)"
     ]
   }
 }

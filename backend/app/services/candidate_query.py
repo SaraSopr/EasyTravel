@@ -53,6 +53,7 @@ async def fetch_candidate_pois(
                         Poi.types.is_(None),
                         Poi.types == [],
                         ~Poi.types.overlap(_EXCLUDED_TYPES_LIST),
+                        Poi.travel_category == "nightlife",
                     ),
                     or_(
                         Poi.types.is_(None),
@@ -64,6 +65,7 @@ async def fetch_candidate_pois(
                 and_(
                     Poi.types.is_not(None),
                     Poi.types.overlap(_FOOD_SERVICE_TYPES_LIST),
+                    or_(Poi.travel_category == "food", Poi.travel_category.is_(None)),
                     or_(Poi.is_touristic.is_(None), Poi.is_touristic == True),  # noqa: E712
                 ),
             ),
