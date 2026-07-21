@@ -14,7 +14,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -31,29 +32,6 @@ from evaluation.profiles import PROFILES_BY_KEY
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
 
 
-async def _calibration_pair_ids(db: AsyncSession) -> set[uuid.UUID]:
-    """Fixed subset of pair ids shown to every evaluator who shares a city
-    (see evaluation.config). Stratified per (pair_type × city): two evaluators
-    who both picked "Roma" always overlap on the same Roma calibration pairs, even
-    though a "Madrid" evaluator never sees them and vice versa — overlap only needs
-    to hold among raters who can actually judge the same POIs.
-
-    Deterministic and independent of evaluator/request order: same ``CALIBRATION_SEED``
-    always yields the same ids, so repeated calls (and every evaluator) agree on
-    which pairs are "calibration" without persisting anything.
-    """
-    res = await db.execute(select(EvaluationPair.id, EvaluationPair.pair_type, EvaluationPair.city))
-    by_cell: dict[tuple[str, str], list[uuid.UUID]] = {}
-    for pid, ptype, city in res.all():
-        by_cell.setdefault((ptype, city), []).append(pid)
-    calibration: set[uuid.UUID] = set()
-    for (ptype, city), ids in by_cell.items():
-        ids = sorted(ids)  # stable order before shuffling
-        random.Random(f"{eval_cfg.CALIBRATION_SEED}:{ptype}:{city}").shuffle(ids)
-        calibration.update(ids[: eval_cfg.CALIBRATION_PAIRS_PER_CELL])
-    return calibration
-
-
 async def _assigned_pair_ids(
     db: AsyncSession, evaluator: str, batch_size: int, city: str | None = None,
 ) -> list[uuid.UUID]:
@@ -68,13 +46,27 @@ async def _assigned_pair_ids(
     calibration slice and the personal batch are restricted to that city's pairs —
     a rater who has never been to Porto can't meaningfully judge two Porto POIs
     against each other.
+
+    One DB round trip: the whole table is ~1k tiny rows, cheap to pull in full and
+    bucket/filter in Python — each remote-DB round trip costs far more here than
+    the extra rows, and this is on the hot path of every ``/pairs`` fetch.
     """
-    calibration_ids = await _calibration_pair_ids(db)
-    query = select(EvaluationPair.id, EvaluationPair.city)
-    if city:
-        query = query.where(EvaluationPair.city == city)
-    res = await db.execute(query)
-    all_ids = sorted((pid for pid, _ in res.all()), key=str)  # stable order before shuffling
+    res = await db.execute(select(EvaluationPair.id, EvaluationPair.pair_type, EvaluationPair.city))
+    rows = res.all()
+
+    # Calibration set: per (pair_type × city) cell, computed over the FULL table
+    # (not pre-filtered by city) so each city's own slice stays fixed regardless of
+    # which city other evaluators picked.
+    by_cell: dict[tuple[str, str], list[uuid.UUID]] = {}
+    for pid, ptype, c in rows:
+        by_cell.setdefault((ptype, c), []).append(pid)
+    calibration_ids: set[uuid.UUID] = set()
+    for (ptype, c), ids in by_cell.items():
+        ids = sorted(ids)  # stable order before shuffling
+        random.Random(f"{eval_cfg.CALIBRATION_SEED}:{ptype}:{c}").shuffle(ids)
+        calibration_ids.update(ids[: eval_cfg.CALIBRATION_PAIRS_PER_CELL])
+
+    all_ids = sorted((pid for pid, _, c in rows if city is None or c == city), key=str)
     calibration = [pid for pid in all_ids if pid in calibration_ids]
     rest = [pid for pid in all_ids if pid not in calibration_ids]
     random.Random(f"{eval_cfg.CALIBRATION_SEED}:order").shuffle(calibration)
@@ -82,36 +74,26 @@ async def _assigned_pair_ids(
     return (calibration + rest)[:batch_size]
 
 
-async def _calibration_itinerary_ids(db: AsyncSession) -> set[uuid.UUID]:
-    """Fixed subset of itinerary ids shown to every evaluator who shares a city
-    (see evaluation.config). Same reasoning as ``_calibration_pair_ids``, stratified
-    per city only (Likert has no pair_type dimension).
-    """
-    res = await db.execute(select(EvaluationItinerary.id, EvaluationItinerary.city))
-    by_city: dict[str, list[uuid.UUID]] = {}
-    for iid, city in res.all():
-        by_city.setdefault(city, []).append(iid)
-    calibration: set[uuid.UUID] = set()
-    for city, ids in by_city.items():
-        ids = sorted(ids)  # stable order before shuffling
-        random.Random(f"{eval_cfg.CALIBRATION_SEED}:itin:{city}").shuffle(ids)
-        calibration.update(ids[: eval_cfg.CALIBRATION_ITINERARIES_PER_CITY])
-    return calibration
-
-
 async def _assigned_itinerary_ids(
     db: AsyncSession, evaluator: str, batch_size: int, city: str | None = None,
 ) -> list[uuid.UUID]:
     """This evaluator's fixed assignment of itinerary ids — same reasoning as
-    ``_assigned_pair_ids``: shared per-city calibration first, then this
-    evaluator's own deterministic shuffle of the rest, truncated to ``batch_size``.
+    ``_assigned_pair_ids`` (one round trip, bucket/filter in Python), stratified by
+    city only (Likert has no pair_type dimension).
     """
-    calibration_ids = await _calibration_itinerary_ids(db)
-    query = select(EvaluationItinerary.id, EvaluationItinerary.city)
-    if city:
-        query = query.where(EvaluationItinerary.city == city)
-    res = await db.execute(query)
-    all_ids = sorted((iid for iid, _ in res.all()), key=str)  # stable order before shuffling
+    res = await db.execute(select(EvaluationItinerary.id, EvaluationItinerary.city))
+    rows = res.all()
+
+    by_city: dict[str, list[uuid.UUID]] = {}
+    for iid, c in rows:
+        by_city.setdefault(c, []).append(iid)
+    calibration_ids: set[uuid.UUID] = set()
+    for c, ids in by_city.items():
+        ids = sorted(ids)  # stable order before shuffling
+        random.Random(f"{eval_cfg.CALIBRATION_SEED}:itin:{c}").shuffle(ids)
+        calibration_ids.update(ids[: eval_cfg.CALIBRATION_ITINERARIES_PER_CITY])
+
+    all_ids = sorted((iid for iid, c in rows if city is None or c == city), key=str)
     calibration = [iid for iid in all_ids if iid in calibration_ids]
     rest = [iid for iid in all_ids if iid not in calibration_ids]
     random.Random(f"{eval_cfg.CALIBRATION_SEED}:itin:order").shuffle(calibration)
@@ -156,21 +138,25 @@ async def get_pairs(
     """
     assigned_ids = await _assigned_pair_ids(db, evaluator, limit, city)
 
+    # One round trip for both "is it already rated" and "fetch the pair object":
+    # LEFT JOIN this evaluator's own rating (NULL when unrated) instead of two
+    # separate queries.
     res = await db.execute(
-        select(EvaluationRating.pair_id).where(
-            EvaluationRating.evaluator_id == evaluator,
-            EvaluationRating.pair_id.in_(assigned_ids),
+        select(EvaluationPair, EvaluationRating.id)
+        .outerjoin(
+            EvaluationRating,
+            and_(
+                EvaluationRating.pair_id == EvaluationPair.id,
+                EvaluationRating.evaluator_id == evaluator,
+            ),
         )
+        .where(EvaluationPair.id.in_(assigned_ids))
     )
-    already_rated = {r for (r,) in res.all()}
-    to_show_ids = [pid for pid in assigned_ids if pid not in already_rated]
-
-    res = await db.execute(select(EvaluationPair).where(EvaluationPair.id.in_(to_show_ids)))
-    by_id = {p.id: p for p in res.scalars().all()}
-    pairs = [by_id[pid] for pid in to_show_ids if pid in by_id]
+    by_id = {pr.id: (pr, rating_id) for pr, rating_id in res.all()}
+    pairs = [by_id[pid][0] for pid in assigned_ids if pid in by_id and by_id[pid][1] is None]
 
     # Counts against THIS evaluator's assignment (e.g. 7/30), not the whole pool.
-    rated_total = len(already_rated)
+    rated_total = sum(1 for _, rating_id in by_id.values() if rating_id is not None)
     pool_total = len(assigned_ids)
 
     # Live place descriptions for the shown POIs — the frozen snapshots predate the
@@ -208,15 +194,17 @@ class RatingIn(BaseModel):
 async def post_rating(body: RatingIn, db: AsyncSession = Depends(get_db)):
     if body.choice not in ("a", "b", "equal"):
         raise HTTPException(status_code=400, detail="choice must be 'a', 'b' or 'equal'")
-    exists = await db.execute(
-        select(EvaluationPair.id).where(EvaluationPair.id == body.pair_id)
-    )
-    if exists.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="pair not found")
+    # No pre-check SELECT: pair_id already has a DB-level foreign key onto
+    # evaluation_pairs, so an invalid id fails at INSERT — one round trip instead
+    # of two, which matters here since every submission pays for it.
     db.add(EvaluationRating(
         pair_id=body.pair_id, evaluator_id=body.evaluator_id, choice=body.choice,
     ))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="pair not found")
     return {"ok": True}
 
 
@@ -238,20 +226,23 @@ async def get_itineraries(
     """
     assigned_ids = await _assigned_itinerary_ids(db, evaluator, limit, city)
 
+    # One round trip for both "is it already rated" and "fetch the itinerary" —
+    # same LEFT JOIN pattern as get_pairs above.
     res = await db.execute(
-        select(EvaluationLikert.itinerary_id).where(
-            EvaluationLikert.evaluator_id == evaluator,
-            EvaluationLikert.itinerary_id.in_(assigned_ids),
+        select(EvaluationItinerary, EvaluationLikert.id)
+        .outerjoin(
+            EvaluationLikert,
+            and_(
+                EvaluationLikert.itinerary_id == EvaluationItinerary.id,
+                EvaluationLikert.evaluator_id == evaluator,
+            ),
         )
+        .where(EvaluationItinerary.id.in_(assigned_ids))
     )
-    already_rated = {r for (r,) in res.all()}
-    to_show_ids = [iid for iid in assigned_ids if iid not in already_rated]
+    by_id = {it.id: (it, likert_id) for it, likert_id in res.all()}
+    itins = [by_id[iid][0] for iid in assigned_ids if iid in by_id and by_id[iid][1] is None]
 
-    res = await db.execute(select(EvaluationItinerary).where(EvaluationItinerary.id.in_(to_show_ids)))
-    by_id = {it.id: it for it in res.scalars().all()}
-    itins = [by_id[iid] for iid in to_show_ids if iid in by_id]
-
-    rated_total = len(already_rated)
+    rated_total = sum(1 for _, likert_id in by_id.values() if likert_id is not None)
     pool_total = len(assigned_ids)
 
     out = []

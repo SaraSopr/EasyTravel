@@ -217,13 +217,13 @@ function PairwisePanel({ evaluator, city }: { evaluator: string; city?: string }
   const choose = async (choice: 'a' | 'b' | 'equal') => {
     if (!current || submitting) return
     setSubmitting(true)
-    // Flash the chosen card green before advancing, as confirmation.
-    if (choice !== 'equal') {
-      setPickedSlot(choice)
-      await new Promise((r) => setTimeout(r, 380))
-    }
+    if (choice !== 'equal') setPickedSlot(choice)
+    // Flash the chosen card green while the save happens, not before it: run the
+    // animation and the request concurrently so the network round trip doesn't
+    // add on top of the fixed 380ms, it overlaps with it.
+    const minFlash = choice !== 'equal' ? new Promise((r) => setTimeout(r, 380)) : Promise.resolve()
     try {
-      await postRating(current.pair_id, evaluator, choice)
+      await Promise.all([postRating(current.pair_id, evaluator, choice), minFlash])
       setPickedSlot(null)
       setIdx((i) => i + 1)
       setRatedTotal((n) => n + 1)
