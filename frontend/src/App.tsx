@@ -12,6 +12,7 @@ import Itinerary from '@/pages/Itinerary'
 import Itineraries from '@/pages/Itineraries'
 import Profile from '@/pages/Profile'
 import Evaluation from '@/pages/Evaluation'
+import DemoApp from '@/demo/DemoApp'
 
 export default function App() {
   // Warm the (effectively static) city list as soon as the app boots, so the
@@ -23,6 +24,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Demo route: full-viewport, no app shell, no auth required */}
+        <Route path="/demo" element={<DemoApp />} />
+
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />

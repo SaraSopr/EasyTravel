@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from app.config import settings
+from app.services import _phase_timer as _pt  # phase profiling, see PHASE_PROFILING_ENABLED
 
 if TYPE_CHECKING:
     from app.models.poi import Poi
@@ -180,6 +181,8 @@ def is_touristic(poi: Poi) -> bool:
     All types are checked (not just primary) so venues like cinemas or hotels
     that appear as secondary types are always excluded.
     """
+    if poi.travel_category == "nightlife":
+        return True
     poi_types = poi.types or []
     if not poi_types:
         return True
@@ -1268,8 +1271,7 @@ def _schedule_day(
     Returns (stops, deferred_candidates, reserved_food_ids):
     - deferred_candidates are (Poi, score) pairs skipped because the POI was
       closed at the planned arrival time.
-    - reserved_food_ids are ids of food POIs pre-selected for a meal but never
-      inserted, reserved so they are not reused on the next day.
+    - reserved_food_ids is always empty (food is selected in Pass 3 at TSP position).
     """
     used_food: set = set()
     used_activity: set = set()
@@ -1283,10 +1285,6 @@ def _schedule_day(
 
     selected_activities: list[tuple[Poi, float]] = []
     deferred_activities: list[tuple[Poi, float]] = []
-    lunch_poi: Poi | None = None
-    lunch_approx: datetime | None = None
-    dinner_poi: Poi | None = None
-    dinner_approx: datetime | None = None
 
     remaining_food = list(food_pois)
 
@@ -1300,7 +1298,7 @@ def _schedule_day(
         exclude: set | None = None,
     ) -> Poi | None:
         """Find the nearest open food POI at time t.
-        pos_lat/pos_lng override the Pass-1 current position (used in Pass 3 post-loop).
+        pos_lat/pos_lng override current_lat/current_lng (Pass-1 position).
         exclude: extra ids to skip (used by the post-loop dinner fallback to try the
         next-best restaurant after one that does not fit the time left).
         """
@@ -1321,65 +1319,33 @@ def _schedule_day(
             eligible.append((fp, haversine_m(_lat, _lng, fp.lat, fp.lng)))
         return pick_best_food(eligible, _pop)
 
+    _pt_t_pass1 = _pt.start()  # phase profiling
     for ap, sim_score in activity_candidates:
         if ap.id in used_activity:
             continue
 
-        # Check lunch window
+        # Check lunch window — reserve time budget only; actual restaurant chosen in
+        # Pass 3 based on the TSP-reordered position (not the similarity-order position here).
         if not lunch_done:
             target = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
             if current >= target - timedelta(minutes=MEAL_WINDOW_MIN):
-                # Probe openness at the meal hour, not at ``current``: if we reach the
-                # window inside the restaurants' afternoon closing break, probing at
-                # ``current`` finds nothing and (below) blocks lunch for the whole day.
                 probe = max(current, target)
-                fp = _pick_nearest_open_food(probe, meal_only=True)
-                if fp is None:
-                    logger.warning("No restaurant found for lunch, falling back to any food POI")
-                    fp = _pick_nearest_open_food(probe, meal_only=False)
-                if fp:
-                    used_food.add(fp.id)
-                    lunch_poi = fp
-                    lunch_approx = current
-                    dur = get_food_duration(fp)
-                    current = current + timedelta(minutes=dur)
-                    current_lat, current_lng = fp.lat, fp.lng
-                    current_id = fp.id
-                    lunch_done = True
-                    logger.info(
-                        "Lunch selected: %s (type: %s, meal_poi: %s)",
-                        fp.name, (fp.types or ["?"])[0], is_meal_poi(fp),
-                    )
-                else:
-                    logger.warning("No food POI found for lunch around %s", current)
-                    lunch_done = True  # prevent infinite retry
+                _fp = _pick_nearest_open_food(probe, meal_only=True)
+                if _fp is None:
+                    _fp = _pick_nearest_open_food(probe, meal_only=False)
+                current = current + timedelta(minutes=get_food_duration(_fp) if _fp else 75)
+                lunch_done = True
 
-        # Check dinner window
+        # Check dinner window — same: time reservation only.
         if not dinner_done:
             target = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
             if current >= target - timedelta(minutes=MEAL_WINDOW_MIN):
-                # Probe openness at the meal hour, not at ``current`` (see lunch above).
                 probe = max(current, target)
-                fp = _pick_nearest_open_food(probe, meal_only=True)
-                if fp is None:
-                    logger.warning("No restaurant found for dinner, falling back to any food POI")
-                    fp = _pick_nearest_open_food(probe, meal_only=False)
-                if fp:
-                    used_food.add(fp.id)
-                    dinner_poi = fp
-                    dinner_approx = current
-                    dur = get_food_duration(fp)
-                    current = current + timedelta(minutes=dur)
-                    current_lat, current_lng = fp.lat, fp.lng
-                    current_id = fp.id
-                    dinner_done = True
-                    logger.info(
-                        "Dinner selected: %s (type: %s, meal_poi: %s)",
-                        fp.name, (fp.types or ["?"])[0], is_meal_poi(fp),
-                    )
-                else:
-                    logger.warning("No food POI found for dinner around %s", current)
-                    dinner_done = True  # prevent infinite retry
+                _fp = _pick_nearest_open_food(probe, meal_only=True)
+                if _fp is None:
+                    _fp = _pick_nearest_open_food(probe, meal_only=False)
+                current = current + timedelta(minutes=get_food_duration(_fp) if _fp else 75)
+                dinner_done = True
 
         # Travel to this activity
         try:
@@ -1420,41 +1386,15 @@ def _schedule_day(
         except Exception as exc:
             logger.warning("Skipping POI %s during scheduling: %s", getattr(ap, "name", "?"), exc)
 
-    # Pre-select any meal POI that the activity loop didn't reach (e.g. all activities
-    # finished before 12:30 or 19:30), AND recover the case where Pass 1 reached the
-    # window but found nothing open at ``current`` (it then set ``*_done=True`` with no
-    # POI). Gating on ``*_poi is None`` rather than ``not *_done`` lets this re-probe at
-    # the proper meal hour instead of leaving the day mealless.
-    if lunch_poi is None:
-        lunch_t = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
-        fp = _pick_nearest_open_food(lunch_t, meal_only=True)
-        if fp is None:
-            fp = _pick_nearest_open_food(lunch_t, meal_only=False)
-        if fp:
-            used_food.add(fp.id)
-            lunch_poi = fp
-
-    if dinner_poi is None:
-        dinner_t = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
-        fp = _pick_nearest_open_food(dinner_t, meal_only=True)
-        if fp is None:
-            logger.warning("No meal POI found for dinner pre-selection (meal_only=True) on %s", day_date.date())
-            fp = _pick_nearest_open_food(dinner_t, meal_only=False)
-        if fp:
-            used_food.add(fp.id)
-            dinner_poi = fp
-            logger.info(
-                "Dinner pre-selected (post-loop): %s (type: %s, meal_poi: %s)",
-                fp.name, (fp.types or ["?"])[0], is_meal_poi(fp),
-            )
-        else:
-            logger.warning("No food POI found for dinner pre-selection on %s", day_date.date())
+    _pt.stop("pass1_select", _pt_t_pass1)  # phase profiling
 
     # --- Pass 2: TSP reorder activities ---
+    _pt_t_tsp = _pt.start()  # phase profiling
     selected_pois = [poi for poi, _ in selected_activities]
     score_by_id = {poi.id: score for poi, score in selected_activities}
     ordered_pois = _solve_tsp(selected_pois, depot_lat, depot_lng)
     ordered_activities = [(poi, score_by_id[poi.id]) for poi in ordered_pois]
+    _pt.stop("tsp_reorder", _pt_t_tsp)  # phase profiling
 
     # --- Pass 3: re-propagate times ---
     final_stops: list[_Stop] = []
@@ -1466,6 +1406,16 @@ def _schedule_day(
 
     lunch_inserted = False
     dinner_inserted = False
+
+    # Pre-estimate dinner duration for the slot-protection guard (probe once from the
+    # depot, same strategy as toptw_solver). The exact restaurant is chosen later at
+    # the actual TSP position; this estimate only determines how much time to reserve.
+    _dinner_target_dt = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
+    _dinner_probe = (
+        _pick_nearest_open_food(_dinner_target_dt, meal_only=True)
+        or _pick_nearest_open_food(_dinner_target_dt, meal_only=False)
+    )
+    _dinner_reserve_min: int = resolve_visit_mode(_dinner_probe, 1.0)[1] if _dinner_probe else 75
 
     def _add_food_stop(food_poi: Poi, forced_arrival: datetime | None = None) -> None:
         nonlocal cur, cur_lat, cur_lng, cur_id
@@ -1513,20 +1463,15 @@ def _schedule_day(
                 travel_lookup, walk_threshold_m,
             )
         arrival = cur + timedelta(minutes=travel_min)
+        if not _is_open(poi, arrival):
+            return "skip"
         vm, vd, vn = resolve_visit_mode(poi, sim_score)
         departure = arrival + timedelta(minutes=vd)
         if departure > end_dt:
             return "full"
-        # Protect the dinner slot: don't add an activity if dinner can no longer
-        # fit before end_dt after it (15 min conservative travel estimate). Use the
-        # duration ``_add_food_stop`` actually applies (``resolve_visit_mode``), not
-        # ``get_food_duration`` — they disagree when a food POI has a
-        # ``tourism_duration_minutes`` (e.g. 90 vs 75), which under-reserves the slot
-        # and lets a late activity squeeze dinner out.
-        if dinner_poi and not dinner_inserted:
-            _, _dinner_dur, _ = resolve_visit_mode(dinner_poi, 1.0)
-            dinner_end_est = departure + timedelta(minutes=15 + _dinner_dur)
-            if dinner_end_est > end_dt:
+        # Protect the dinner slot using the pre-estimated duration.
+        if not dinner_inserted and _dinner_reserve_min:
+            if departure + timedelta(minutes=15 + _dinner_reserve_min) > end_dt:
                 return "full"
         # Per-day type cap: avoid church/type fatigue.
         primary = (poi.types or [""])[0]
@@ -1553,21 +1498,63 @@ def _schedule_day(
 
     lunch_target = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
     dinner_target = day_date.replace(hour=DINNER_TARGET_H, minute=0, second=0, microsecond=0)
+    _dinner_floor = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
 
     for act, sim_score in ordered_activities:
-        # Insert lunch before next activity if we've reached the lunch window
-        if lunch_poi and not lunch_inserted:
+        _pt_t_meal = _pt.start()  # phase profiling
+        # Insert lunch before next activity if we've reached the lunch window.
+        # Pick the restaurant now based on actual TSP position (cur_lat, cur_lng).
+        if not lunch_inserted:
             if cur >= lunch_target - timedelta(minutes=MEAL_WINDOW_MIN):
-                _add_food_stop(lunch_poi)
+                probe = max(cur, lunch_target)
+                fp = _pick_nearest_open_food(probe, meal_only=True, pos_lat=cur_lat, pos_lng=cur_lng)
+                if fp is None:
+                    fp = _pick_nearest_open_food(probe, meal_only=False, pos_lat=cur_lat, pos_lng=cur_lng)
+                if fp:
+                    used_food.add(fp.id)
+                    _add_food_stop(fp)
                 lunch_inserted = True
 
-        # Insert dinner before next activity if we've reached the dinner window
-        if dinner_poi and not dinner_inserted:
+        # Insert dinner before next activity if we've reached the dinner window.
+        if not dinner_inserted:
             if cur >= dinner_target - timedelta(minutes=MEAL_WINDOW_MIN):
-                _add_food_stop(dinner_poi)
+                probe = max(cur, dinner_target)
+                fp = _pick_nearest_open_food(probe, meal_only=True, pos_lat=cur_lat, pos_lng=cur_lng)
+                if fp is None:
+                    fp = _pick_nearest_open_food(probe, meal_only=False, pos_lat=cur_lat, pos_lng=cur_lng)
+                if fp:
+                    used_food.add(fp.id)
+                    _add_food_stop(fp)
                 dinner_inserted = True
 
-        if _add_activity_stop(act, sim_score) == "full":
+        # Look-ahead: if adding this activity would push cur past the dinner window,
+        # insert dinner now (with DINNER_MIN_H floor) before the activity swallows the slot.
+        if not dinner_inserted:
+            _, _la_act_travel = _travel(cur_id, cur_lat, cur_lng, act.id, act.lat, act.lng,
+                                        travel_lookup, walk_threshold_m)
+            _, _la_act_dur, _ = resolve_visit_mode(act, sim_score)
+            if cur + timedelta(minutes=_la_act_travel + _la_act_dur) >= dinner_target - timedelta(minutes=MEAL_WINDOW_MIN):
+                _la_probe = max(cur, dinner_target)
+                _la_fp = (
+                    _pick_nearest_open_food(_la_probe, meal_only=True, pos_lat=cur_lat, pos_lng=cur_lng)
+                    or _pick_nearest_open_food(_la_probe, meal_only=False, pos_lat=cur_lat, pos_lng=cur_lng)
+                )
+                if _la_fp:
+                    _, _la_fp_travel = _travel(cur_id, cur_lat, cur_lng, _la_fp.id, _la_fp.lat, _la_fp.lng,
+                                               travel_lookup, walk_threshold_m)
+                    _la_arrival = cur + timedelta(minutes=_la_fp_travel)
+                    _, _la_food_dur, _ = resolve_visit_mode(_la_fp, 1.0)
+                    _la_forced = min(max(_la_arrival, _dinner_floor), end_dt - timedelta(minutes=_la_food_dur))
+                    if _la_forced >= _la_arrival:
+                        used_food.add(_la_fp.id)
+                        _add_food_stop(_la_fp, forced_arrival=_la_forced)
+                        dinner_inserted = True
+        _pt.stop("meal_insertion", _pt_t_meal)  # phase profiling
+
+        _pt_t_prop = _pt.start()  # phase profiling
+        _add_activity_result = _add_activity_stop(act, sim_score)
+        _pt.stop("activity_propagate", _pt_t_prop)  # phase profiling
+        if _add_activity_result == "full":
             break  # day is full
         # "skip" (per-day type cap) → keep scanning so meals still get their in-loop slot
 
@@ -1576,6 +1563,7 @@ def _schedule_day(
     # skipped for lack of time, in MMR (relevance) order. Opening hours are
     # re-checked here (Pass 1 vetted a different arrival time); end_dt, the
     # dinner slot and per-type caps are enforced by _add_activity_stop. ---
+    _pt_t_refill = _pt.start()  # phase profiling
     deferred_ids = {p.id for p, _ in deferred_activities}
     refill_pool = [
         (ap, s) for ap, s in activity_candidates
@@ -1591,35 +1579,46 @@ def _schedule_day(
         if _add_activity_stop(ap, sim_score) == "added":
             used_activity.add(ap.id)
             logger.info("Refill: added %s after TSP freed up time", ap.name)
+    _pt.stop("refill", _pt_t_refill)  # phase profiling
 
+    _pt_t_postloop_meal = _pt.start()  # phase profiling
     # After loop: insert any meal not yet added (e.g. all activities finished before meal time).
     # Only insert if at least one activity was scheduled — a day with only food stops makes
     # no sense and means all activities were deferred due to opening hours.
     has_activities = any(s.poi.travel_category != "food" and not is_actual_food_poi(s.poi) for s in final_stops)
 
-    if has_activities and lunch_poi and not lunch_inserted:
-        _, travel_min = _travel(
-            cur_id, cur_lat, cur_lng, lunch_poi.id, lunch_poi.lat, lunch_poi.lng,
-            travel_lookup, walk_threshold_m,
-        )
-        arrival = cur + timedelta(minutes=travel_min)
-        if arrival + timedelta(minutes=get_food_duration(lunch_poi)) <= end_dt:
-            _add_food_stop(lunch_poi)
-            lunch_inserted = True
+    if has_activities and not lunch_inserted:
+        lunch_t = day_date.replace(hour=LUNCH_TARGET_H, minute=0, second=0, microsecond=0)
+        probe = max(cur, lunch_t)
+        fp = _pick_nearest_open_food(probe, meal_only=True, pos_lat=cur_lat, pos_lng=cur_lng)
+        if fp is None:
+            fp = _pick_nearest_open_food(probe, meal_only=False, pos_lat=cur_lat, pos_lng=cur_lng)
+        if fp:
+            _, travel_min = _travel(cur_id, cur_lat, cur_lng, fp.id, fp.lat, fp.lng, travel_lookup, walk_threshold_m)
+            arrival = cur + timedelta(minutes=travel_min)
+            if arrival + timedelta(minutes=get_food_duration(fp)) <= end_dt:
+                used_food.add(fp.id)
+                _add_food_stop(fp)
+                lunch_inserted = True
+            else:
+                logger.warning("Lunch not inserted for day %s — no time slot available", day_date.date())
         else:
-            logger.warning("Lunch not inserted for day %s — no time slot available", day_date.date())
+            logger.warning("Lunch not inserted for day %s — no food POI available", day_date.date())
 
-    if has_activities and dinner_poi and not dinner_inserted:
+    if has_activities and not dinner_inserted:
         dinner_min_dt = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
-        # Try the pre-selected dinner; if it is too long for the time left, fall through
-        # to the next-best open restaurant that fits (mirrors the TOPTW post-pass) rather
-        # than dropping the meal. Place dinner at the DINNER_MIN_H floor when we'd arrive
-        # earlier, clamped so it never overflows end_dt: forced = clamp into
-        # [arrival, end_dt − duration]. The duration MUST match what ``_add_food_stop``
-        # applies (``resolve_visit_mode``): ``get_food_duration`` under-counts some food
-        # types (e.g. La Gattabuia: 75 vs 90), which would overflow end_dt and drop the meal.
+        # Pick the best open restaurant at the actual TSP-end position; if too long for
+        # the time left, fall through to the next-best that fits.
         tried: set = set()
-        candidate: Poi | None = dinner_poi
+        candidate: Poi | None = (
+            _pick_nearest_open_food(
+                max(cur, dinner_target), meal_only=True,
+                pos_lat=cur_lat, pos_lng=cur_lng,
+            ) or _pick_nearest_open_food(
+                max(cur, dinner_target), meal_only=False,
+                pos_lat=cur_lat, pos_lng=cur_lng,
+            )
+        )
         for _ in range(_DINNER_CANDIDATE_TRIES):
             if candidate is None:
                 break
@@ -1631,6 +1630,7 @@ def _schedule_day(
             _, food_dur, _ = resolve_visit_mode(candidate, 1.0)
             forced = min(max(arrival, dinner_min_dt), end_dt - timedelta(minutes=food_dur))
             if forced >= arrival:
+                used_food.add(candidate.id)
                 _add_food_stop(candidate, forced_arrival=forced)
                 dinner_inserted = True
                 logger.info(
@@ -1647,15 +1647,9 @@ def _schedule_day(
             )
         if not dinner_inserted:
             logger.warning("Dinner not inserted for day %s — no time slot available", day_date.date())
+    _pt.stop("meal_insertion", _pt_t_postloop_meal)  # phase profiling
 
-    # Collect food that was pre-selected but never inserted (reserved to avoid reuse next day)
-    reserved_food_ids: set = set()
-    if lunch_poi and not lunch_inserted:
-        reserved_food_ids.add(lunch_poi.id)
-    if dinner_poi and not dinner_inserted:
-        reserved_food_ids.add(dinner_poi.id)
-
-    return final_stops, deferred_activities, reserved_food_ids
+    return final_stops, deferred_activities, set()
 
 
 # ---------------------------------------------------------------------------
@@ -1732,6 +1726,7 @@ async def generate(
     start_lng: float | None = None,
     end_lat: float | None = None,
     end_lng: float | None = None,
+    trace: dict | None = None,  # demo visualiser: passive snapshot recording only
 ) -> tuple[list[list[_Stop]], list[str]]:
     """
     Plan a multi-day itinerary.
@@ -1767,14 +1762,18 @@ async def generate(
         settings.walk_personalization,
     )
 
+    _pt_t_prep = _pt.start()  # phase profiling
     # POIs classified as "food" always go to the food pool, even if Google types
     # don't include explicit food types (e.g. primary type "point_of_interest").
     food_pois = [p for p in candidate_places if p.travel_category == "food" or is_actual_food_poi(p)]
     activity_pois = [p for p in candidate_places if p.travel_category != "food" and not is_actual_food_poi(p)]
 
-    # Python-level safety filter (catches edge cases SQL filter may miss)
+    # Python-level safety filter (catches edge cases SQL filter may miss).
+    # Keep validated food POIs even when Google also tags them as retail/store
+    # (common for bakeries, enoteche, historic cafes); the SQL food branch already
+    # required a food-service type and touristic status.
     activity_pois = [p for p in activity_pois if is_touristic(p)]
-    food_pois = [p for p in food_pois if is_touristic(p)]
+    food_pois = [p for p in food_pois if p.is_touristic is None or p.is_touristic is True]
 
     # Exclude activity POIs too far from the city centre. In fixed mode this is
     # the A/B radius; in adaptive mode the same 8 km default becomes the minimum
@@ -1844,6 +1843,7 @@ async def generate(
 
     # Sort food by cosine similarity (global pool, shared across days)
     food_pois.sort(key=lambda p: _cosine_sim(uvec, _poi_vec(p)), reverse=True)
+    _pt.stop("prep_common", _pt_t_prep)  # phase profiling
 
     # --- Dispatch: TOPTW optimiser vs greedy baseline ---
     chosen_solver = (solver or settings.itinerary_solver or "greedy").lower()
@@ -1851,6 +1851,7 @@ async def generate(
         from app.services import toptw_solver
 
         logger.info("Dispatching to TOPTW solver (num_days=%d)", num_days)
+        _pt_t_toptw = _pt.start()  # phase profiling
         toptw_days, toptw_warnings = await toptw_solver.plan(
             activity_pois=activity_pois,
             food_pois=food_pois,
@@ -1870,7 +1871,9 @@ async def generate(
             end_lat=end_lat,
             end_lng=end_lng,
             session=session,
+            trace=trace,
         )
+        _pt.stop("toptw_plan_total", _pt_t_toptw)  # phase profiling
         warnings.extend(toptw_warnings)
         elapsed_ms = int((_time_mod.monotonic() - t0) * 1000)
         logger.info(
@@ -1887,9 +1890,17 @@ async def generate(
     today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
 
     # --- Level 1: geographic clustering ---
+    _pt_t_cluster = _pt.start()  # phase profiling
     clusters = _cluster_pois(activity_pois, num_days, city_lat, city_lng)
     clusters = _rebalance_clusters(clusters)
+    _pt.stop("clustering", _pt_t_cluster)  # phase profiling
     actual_days = len(clusters)
+    if trace is not None:
+        trace["clusters"] = {
+            str(p.id): day_idx
+            for day_idx, cid in enumerate(sorted(clusters.keys()))
+            for p in clusters[cid]
+        }
 
     logger.info("Clustering: %d activity POIs → %d clusters", len(activity_pois), actual_days)
 
@@ -1962,6 +1973,7 @@ async def generate(
         mmr_k = min(len(all_candidates), max(25, estimated_stops * 3))
 
         candidate_pois_only = [p for p, _ in all_candidates]
+        _pt_t_mmr = _pt.start()  # phase profiling
         candidates = _mmr_select(
             candidates=candidate_pois_only,
             uvec=uvec,
@@ -1973,6 +1985,7 @@ async def generate(
             popularity_scores=popularity_scores,
             proximity_km=proximity_km,
         )
+        _pt.stop("mmr_select", _pt_t_mmr)  # phase profiling
 
         from collections import Counter
         cats = Counter(poi.travel_category for poi, _ in candidates)
@@ -1980,6 +1993,8 @@ async def generate(
             "  Cluster %d: MMR selected %d POIs from %d candidates — categories: %s",
             cluster_id, len(candidates), len(all_candidates), dict(cats),
         )
+        if trace is not None:
+            trace.setdefault("mmr_selected", []).extend(str(p.id) for p, _ in candidates)
 
         available_food = [p for p in food_pois if p.id not in used_food_ids]
 
@@ -1989,14 +2004,17 @@ async def generate(
         # haversine transparently when routing is disabled or a leg has no route.
         travel_lookup: TravelLookup = {}
         if session is not None and settings.routes_api_enabled:
+            _pt_t_prefetch = _pt.start()  # phase profiling
             try:
                 travel_lookup = await prefetch_travel_matrix(
                     session, [p for p, _ in candidates], walk_threshold_m
                 )
             except Exception as exc:  # routing must never block generation
                 logger.warning("Travel-matrix prefetch failed (%s) — using haversine", exc)
+            _pt.stop("routing_prefetch", _pt_t_prefetch)  # phase profiling
 
         # --- Schedule day ---
+        _pt_t_sched = _pt.start()  # phase profiling
         stops, deferred, reserved = await loop.run_in_executor(
             executor,
             _schedule_day,
@@ -2012,6 +2030,7 @@ async def generate(
             max_food_price_level,
             walk_threshold_m,
         )
+        _pt.stop("schedule_day_total", _pt_t_sched)  # phase profiling
 
         if deferred:
             global_deferred.extend(deferred)

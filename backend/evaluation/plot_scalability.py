@@ -1,13 +1,14 @@
-"""Plot RQ1c scalability from scalability_results.csv.
+"""Plot the candidate-pool (N) sweep from scalability_results.csv.
 
 Reads the output of run_scalability.py (a grid of cities × profiles × durations)
-and writes evaluation/figures/fig3_rq1c_scalability.png.
+and writes evaluation/figures/fig5_rq1d_scalability_n.png. (fig3_rq1c_scalability
+is the by-duration figure produced by analysis.py from metrics_2x2.csv — a
+different chart; keep the two filenames distinct.)
 
-Each (city, profile, duration) is one instance. For TOPTW the figure shows, per
-duration, the mean over instances at each candidate level with a shaded min–max
-band, so the N-trend is visible *and* its spread across instances is exposed —
-the scalability claim no longer rests on a single (city, profile) pair. Greedy
-is drawn as a horizontal reference (its mean, candidate count does not apply).
+Each (city, profile, duration) is one instance. For each solver the figure shows,
+per duration, the mean over instances at each candidate level with a shaded
+inter-quartile band, so the N-trend is visible *and* its spread across instances
+is exposed. Greedy and TOPTW are evaluated on the same top-N activity pool.
 
 Usage (from backend/):
     python -m evaluation.plot_scalability
@@ -66,7 +67,7 @@ def _quantile(vals: list[float], q: float) -> float:
 
 
 def _aggregate(rows: list[dict], solver: str, num_days: int, metric: str):
-    """Returns (xs, means, los, his) over candidate levels for TOPTW, aggregating
+    """Returns (xs, means, los, his) over candidate levels for one solver, aggregating
     across city × profile instances. Band is the inter-quartile range (25–75th
     percentile) — robust to single-instance outliers (e.g. cold-cache solve time).
     xs are sorted candidate counts."""
@@ -82,14 +83,6 @@ def _aggregate(rows: list[dict], solver: str, num_days: int, metric: str):
     los = [_quantile(by_n[x], 0.25) for x in xs]
     his = [_quantile(by_n[x], 0.75) for x in xs]
     return xs, means, los, his
-
-
-def _greedy_mean(rows: list[dict], num_days: int, metric: str) -> float | None:
-    vals = [
-        _float(r[metric]) for r in rows
-        if r["solver"] == "greedy" and r["num_days"] == num_days and _float(r[metric]) is not None
-    ]
-    return statistics.mean(vals) if vals else None
 
 
 def plot(csv_path: str, out_dir: Path) -> None:
@@ -108,8 +101,8 @@ def plot(csv_path: str, out_dir: Path) -> None:
     ]
     fig, axes = plt.subplots(1, len(panels), figsize=(18, 5))
     fig.suptitle(
-        "RQ1c — Scalability vs candidate pool size (N): TOPTW mean over instances, "
-        "IQR band (25–75th pct)\n"
+        "Candidate-pool sweep — quality, feasibility and runtime vs N: "
+        "mean over instances, IQR band (25–75th pct)\n"
         f"({len(instances)} instances = "
         f"{len({i[0] for i in instances})} cities × "
         f"{len({i[1] for i in instances})} profiles × {len(durations)} durations; routing: real)",
@@ -131,12 +124,16 @@ def plot(csv_path: str, out_dir: Path) -> None:
                 handles.append(line)
                 band_vals += los + his
 
-            gval = _greedy_mean(rows, num_days, metric)
-            if gval is not None:
-                ax.axhline(gval, color=color, linewidth=1.4, linestyle="--", alpha=0.6)
-                xmax = max(candidate_levels) if candidate_levels else 120
-                ax.text(xmax + 1, gval, f"Greedy/{num_days}d", va="center",
-                        fontsize=7.5, color=color, alpha=0.8)
+            gxs, gmeans, glos, ghis = _aggregate(rows, "greedy", num_days, metric)
+            if gxs:
+                ax.fill_between(gxs, glos, ghis, color=color, alpha=0.06, linewidth=0)
+                line, = ax.plot(
+                    gxs, gmeans, color=color, marker=marker, linewidth=1.5,
+                    markersize=4.5, linestyle="--", alpha=0.75,
+                    label=f"Greedy / {num_days}d",
+                )
+                handles.append(line)
+                band_vals += glos + ghis
 
         # Tighten the y-axis to the IQR band (means + quartiles), so the trend is
         # legible; do this BEFORE drawing the N=80 marker so its label is anchored
@@ -150,7 +147,7 @@ def plot(csv_path: str, out_dir: Path) -> None:
         ax.text(80, 0.02, " default (N=80)", fontsize=7, color="#888",
                 va="bottom", ha="left", transform=ax.get_xaxis_transform())
 
-        ax.set_xlabel("toptw_num_candidates (N)", fontsize=10)
+        ax.set_xlabel("activity candidates (N)", fontsize=10)
         ax.set_ylabel(ylabel, fontsize=9)
         ax.set_title(title, fontsize=10, fontweight="bold", pad=8)
         ax.spines[["top", "right"]].set_visible(False)
@@ -158,7 +155,7 @@ def plot(csv_path: str, out_dir: Path) -> None:
             ax.legend(handles=handles, fontsize=8, frameon=False)
 
     fig.tight_layout()
-    out = out_dir / "fig3_rq1c_scalability.png"
+    out = out_dir / "fig5_rq1d_scalability_n.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {out}  ({len(instances)} instances)")

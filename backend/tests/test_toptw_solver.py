@@ -280,13 +280,14 @@ async def test_fill_underfull_day_borrows_nearby_candidates(monkeypatch):
     ]
     food = [_restaurant("Rw", dlng=-0.03), _restaurant("Re", dlng=0.03)]
 
-    async def _run():
+    async def _run(trace=None):
         return await toptw_solver.plan(
             activity_pois=[*west, *east], food_pois=food, uvec=_uvec(),
             popularity_scores={}, num_days=2,
             start_time_str="09:00", end_time_str="20:00",
             city_lat=_BASE_LAT, city_lng=_BASE_LNG,
             confirmed_visited_ids=set(), previously_suggested_ids=set(), session=None,
+            trace=trace,
         )
 
     def _west_activity_count(all_days):
@@ -301,7 +302,8 @@ async def test_fill_underfull_day_borrows_nearby_candidates(monkeypatch):
     days_off, _ = await _run()
 
     monkeypatch.setattr(toptw_solver.settings, "toptw_fill_underfull_days", True, raising=False)
-    days_on, _ = await _run()
+    trace = {}
+    days_on, _ = await _run(trace)
 
     # The under-full west day gains stops; the east day stays purely eastern.
     assert _west_activity_count(days_on) > _west_activity_count(days_off)
@@ -309,6 +311,182 @@ async def test_fill_underfull_day_borrows_nearby_candidates(monkeypatch):
         acts = [s for s in day if s.poi.travel_category != "food"]
         if acts and sum(s.poi.lng for s in acts) / len(acts) > _BASE_LNG:
             assert all(s.poi.lng > _BASE_LNG for s in acts), "east day must stay eastern"
+
+    # Trace semantics are explicit: candidates offered to the second solve are
+    # distinct from the subset it actually retains.
+    fill = trace["fill"]
+    assert fill["enabled"] is True
+    assert fill["applicable"] is True
+    injected = {
+        pid for state in fill["days"].values() for pid in state["injected"]
+    }
+    scheduled = {
+        pid for state in fill["days"].values() for pid in state["scheduled"]
+    }
+    assert injected
+    assert scheduled
+    assert scheduled <= injected
+    assert {
+        pid for ids in trace["fill_added"].values() for pid in ids
+    } == scheduled
+
+
+@pytest.mark.asyncio
+async def test_fill_resolve_degradation_is_reverted(monkeypatch):
+    """If the fill re-solve leaves a day with *less* activity load than before
+    the fill (observed on Roma: the retained candidate's afternoon-only window
+    dragged the day late and better POIs fell out), that day must be restored
+    to its pre-fill route instead of shipping the degraded one."""
+    monkeypatch.setattr(toptw_solver.settings, "routes_api_enabled", False, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_time_limit_s", 3, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_num_candidates", 6, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_pre_cluster_mode", "on", raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_prune_outliers", False, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_fill_underfull_days", True, raising=False)
+
+    # Same geometry as the borrow test: the west day is under-full and injects.
+    west = [
+        _poi(f"W{i}", dlat=0.0005 * i, dlng=-0.03,
+             tourism_duration_minutes=20, user_ratings_total=1000 + i)
+        for i in range(8)
+    ]
+    east = [
+        _poi(f"E{i}", dlat=0.0005 * i, dlng=0.03,
+             tourism_duration_minutes=120, user_ratings_total=5000)
+        for i in range(3)
+    ]
+    food = [_restaurant("Rw", dlng=-0.03), _restaurant("Re", dlng=0.03)]
+
+    # The first solve runs for real; the re-solve returns a crippled solution
+    # (one POI per day), simulating a degrading second pass.
+    real_solve = toptw_solver._solve
+    calls = {"n": 0}
+
+    def crippled_resolve(*args, **kwargs):
+        calls["n"] += 1
+        result = real_solve(*args, **kwargs)
+        if calls["n"] >= 2 and result is not None:
+            return [ordered[:1] for ordered in result]
+        return result
+
+    monkeypatch.setattr(toptw_solver, "_solve", crippled_resolve)
+
+    trace = {}
+    all_days, _ = await toptw_solver.plan(
+        activity_pois=[*west, *east], food_pois=food, uvec=_uvec(),
+        popularity_scores={}, num_days=2,
+        start_time_str="09:00", end_time_str="20:00",
+        city_lat=_BASE_LAT, city_lng=_BASE_LNG,
+        confirmed_visited_ids=set(), previously_suggested_ids=set(), session=None,
+        trace=trace,
+    )
+
+    assert calls["n"] >= 2, "the under-full day must trigger a re-solve"
+
+    fill = trace["fill"]
+    statuses = {state["status"] for state in fill["days"].values()}
+    assert "fill_reverted" in statuses, statuses
+    for state in fill["days"].values():
+        # Every day is at least as loaded as before the fill, and nothing from
+        # the crippled re-solve is reported as retained.
+        assert state["used_s_after"] >= state["used_s_before"]
+        assert state["scheduled"] == []
+    assert trace["fill_added"] == {}
+
+    # The itinerary itself keeps the pre-fill days: more than the one activity
+    # per day the crippled re-solve returned.
+    for day in all_days:
+        activities = [s for s in day if s.poi.travel_category != "food"]
+        assert len(activities) > 1
+
+
+@pytest.mark.asyncio
+async def test_single_day_fill_trace_is_not_reported_as_above_threshold(monkeypatch):
+    """No pinning means the zone-borrow pass is inapplicable, not 'well-filled'."""
+    monkeypatch.setattr(toptw_solver.settings, "routes_api_enabled", False, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_time_limit_s", 2, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_fill_underfull_days", True, raising=False)
+
+    trace = {}
+    await toptw_solver.plan(
+        activity_pois=[_poi(f"A{i}", dlat=0.001 * i) for i in range(4)],
+        food_pois=[_restaurant("R")],
+        uvec=_uvec(), popularity_scores={}, num_days=1,
+        start_time_str="09:00", end_time_str="20:00",
+        city_lat=_BASE_LAT, city_lng=_BASE_LNG,
+        confirmed_visited_ids=set(), previously_suggested_ids=set(),
+        session=None, trace=trace,
+    )
+
+    assert trace["fill"]["applicable"] is False
+    assert {
+        state["status"] for state in trace["fill"]["days"].values()
+    } == {"not_applicable_global"}
+
+
+@pytest.mark.asyncio
+async def test_visit_that_cannot_finish_before_closing_is_not_selected(monkeypatch):
+    monkeypatch.setattr(toptw_solver.settings, "routes_api_enabled", False, raising=False)
+    monkeypatch.setattr(toptw_solver.settings, "toptw_time_limit_s", 2, raising=False)
+
+    today = datetime.today()
+    gday = (today.weekday() + 1) % 7
+    impossible = _poi(
+        "Too long for window",
+        opening_hours={"periods": [{
+            "open": {"day": gday, "time": "1400"},
+            "close": {"day": gday, "time": "1500"},
+        }]},
+        tourism_duration_minutes=120,
+        user_ratings_total=500_000,
+    )
+    others = [_poi(f"O{i}", dlat=0.001 * i) for i in range(3)]
+
+    days, _ = await toptw_solver.plan(
+        activity_pois=[impossible, *others],
+        food_pois=[_restaurant("R")],
+        uvec=_uvec(), popularity_scores={}, num_days=1,
+        start_time_str="09:00", end_time_str="20:00",
+        city_lat=_BASE_LAT, city_lng=_BASE_LNG,
+        confirmed_visited_ids=set(), previously_suggested_ids=set(), session=None,
+    )
+
+    assert all(stop.poi is not impossible for day in days for stop in day)
+
+
+def test_solver_enforces_primary_type_cap_before_scheduling():
+    """The optimiser must not count activities the final scheduler would discard."""
+    day = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+    churches = [
+        _poi(
+            f"Church {i}",
+            dlat=0.0002 * i,
+            types=["church"],
+            tourism_duration_minutes=45,
+            user_ratings_total=10_000 + i,
+        )
+        for i in range(5)
+    ]
+    candidates = [(poi, 1.0, 1.0) for poi in churches]
+
+    solved = toptw_solver._solve(
+        candidates=candidates,
+        num_days=1,
+        day_start_min=9 * 60,
+        day_total_s=9 * 3600,
+        budget_s=7 * 3600,
+        day_dates=[day],
+        start_lat=_BASE_LAT,
+        start_lng=_BASE_LNG,
+        end_lat=_BASE_LAT,
+        end_lng=_BASE_LNG,
+        travel_lookup={},
+        prize_scale=100_000,
+        time_limit_s=2,
+    )
+
+    assert solved is not None
+    assert len(solved[0]) <= 2
 
 
 def test_prune_cluster_outliers_drops_isolated_non_icon():

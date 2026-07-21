@@ -59,8 +59,8 @@ required to explain a methodological contribution.
 3. Greedy baseline
 4. Proposed hybrid TOPTW approach
 5. Geographical pre-clustering
-6. Intra-day TSPTW reordering
-7. Meal insertion and underfull-day filling
+6. Intra-day TSPTW reordering and underfull-day filling
+7. Meal insertion
 8. Complexity and reproducibility
 9. Limitations
 

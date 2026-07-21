@@ -1,13 +1,15 @@
-"""RQ1c scalability experiment — varies toptw_num_candidates and num_days.
+"""RQ1c scalability experiment — varies candidate pool size and num_days.
 
-Sweeps ``toptw_num_candidates`` across CANDIDATE_COUNTS for both TOPTW and
-greedy, over a grid of cities × profiles × durations so the scalability claim
-rests on multiple instances rather than a single (city, profile) pair. Greedy
-ignores the candidate-count parameter but is included as reference for the
-solve-time comparison.
+Sweeps CANDIDATE_COUNTS for both TOPTW and greedy over a grid of cities ×
+profiles × durations so the scalability claim rests on multiple instances
+rather than a single (city, profile) pair.
+
+For each N, both solvers receive the same top-N activity POIs plus the full food
+pool. This keeps the comparison fair: TOPTW no longer starts from a different
+number of POIs than the greedy baseline.
 
 Each (city, profile, duration) is one "instance"; the plot aggregates across
-instances (mean + min–max band), exposing how robust the N-trend is.
+instances (mean + IQR band), exposing how robust the N-trend is.
 
 Output: scalability_results.csv (path configurable via --out)
 
@@ -45,7 +47,7 @@ from app.services.itinerary_planner import (
     is_touristic,
     resolve_activity_radius_m,
 )
-from app.services.toptw_solver import compute_prize
+from app.services.toptw_solver import compute_prize, select_candidates
 from evaluation import config as cfg
 from evaluation.metrics import compute_metrics
 from evaluation.profiles import PROFILES_BY_KEY
@@ -84,25 +86,46 @@ async def _run_cell(db, profile, city, num_days: int, solver: str, num_candidate
     start_str, end_str = _schedule_for_mode(TravelMode(travel_mode))
 
     settings.routes_api_enabled = True
-    if solver == "toptw":
-        settings.toptw_num_candidates = num_candidates
+    settings.toptw_num_candidates = num_candidates
 
-    candidates = await fetch_candidate_pois(db, city.id, travel_with_children=travel_with_children)
-    if len(candidates) < num_days * 3:
+    raw_candidates = await fetch_candidate_pois(db, city.id, travel_with_children=travel_with_children)
+    if len(raw_candidates) < num_days * 3:
         logger.warning("skip %s/%s/%dd/%s — only %d candidates",
-                       profile.key, city.name, num_days, solver, len(candidates))
+                       profile.key, city.name, num_days, solver, len(raw_candidates))
         return None
 
     prefs = _build_prefs(profile)
     uvec = _apply_mode_bias(_user_vec(prefs), travel_mode)
-    popularity = compute_popularity_scores(candidates)
+    raw_popularity = compute_popularity_scores(raw_candidates)
 
-    activity_pois = [p for p in candidates if p.travel_category != "food" and not is_actual_food_poi(p)]
+    food_pois = [p for p in raw_candidates if p.travel_category == "food" or is_actual_food_poi(p)]
+    activity_pois = [p for p in raw_candidates if p.travel_category != "food" and not is_actual_food_poi(p)]
     activity_pois = [p for p in activity_pois if is_touristic(p)]
     max_m = resolve_activity_radius_m(activity_pois, city.lat, city.lng, num_days)
     activity_pois = [p for p in activity_pois if haversine_m(p.lat, p.lng, city.lat, city.lng) <= max_m]
     if travel_mode == "family":
         activity_pois = [p for p in activity_pois if p.travel_category != "nightlife"]
+    selected_activity = [
+        p for p, _prize, _sim in select_candidates(
+            activity_pois,
+            uvec,
+            raw_popularity,
+            confirmed_visited_ids=set(),
+            previously_suggested_ids=set(),
+            n=num_candidates,
+            w_sim=settings.toptw_w_sim,
+            w_pop=settings.toptw_w_pop,
+        )
+    ]
+    candidates = [*selected_activity, *food_pois]
+    if len(selected_activity) < num_days * 3:
+        logger.warning(
+            "skip %s/%s/%dd/%s/nc=%d — only %d selected activity candidates",
+            profile.key, city.name, num_days, solver, num_candidates, len(selected_activity),
+        )
+        return None
+    activity_pois = selected_activity
+    popularity = compute_popularity_scores(candidates)
 
     prize_by_id = {
         p.id: compute_prize(p, uvec, popularity, settings.toptw_w_sim, settings.toptw_w_pop)[0]
@@ -202,7 +225,7 @@ async def run(args) -> None:
             n_instances = len(cities) * len(profiles) * len(DURATIONS)
             logger.info(
                 "Scalability grid: %d cities × %d profiles × %d durations = %d instances, "
-                "%d candidate levels each (+greedy ref)",
+                "%d candidate levels × 2 solvers",
                 len(cities), len(profiles), len(DURATIONS), n_instances, len(CANDIDATE_COUNTS),
             )
 
@@ -210,18 +233,12 @@ async def run(args) -> None:
                 for profile in profiles:
                     for num_days in DURATIONS:
                         logger.info("════ %s / %s / %dd ════", city.name, profile.key, num_days)
-                        # Greedy reference — candidate count doesn't apply; use default pool
-                        settings.toptw_num_candidates = orig_candidates
-                        row = await _run_cell(db, profile, city, num_days, "greedy", orig_candidates)
-                        if row:
-                            rows.append(row)
-
-                        # TOPTW sweep over N
                         for nc in CANDIDATE_COUNTS:
-                            logger.info("── TOPTW / %d candidates ──", nc)
-                            row = await _run_cell(db, profile, city, num_days, "toptw", nc)
-                            if row:
-                                rows.append(row)
+                            logger.info("── %d activity candidates ──", nc)
+                            for solver in ("greedy", "toptw"):
+                                row = await _run_cell(db, profile, city, num_days, solver, nc)
+                                if row:
+                                    rows.append(row)
 
     finally:
         settings.toptw_num_candidates = orig_candidates

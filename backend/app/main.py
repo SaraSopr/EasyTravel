@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.limiter import limiter
-from app.routers import auth, evaluation, itineraries, meta, onboarding, photos, places, recommendations, users
+from app.routers import auth, demo, evaluation, itineraries, meta, onboarding, photos, places, recommendations, users
 from app.utils.logging import LoggingMiddleware
 
 logging.basicConfig(
@@ -48,6 +48,7 @@ app.include_router(places.router, prefix="/api")
 app.include_router(photos.router, prefix="/api")
 app.include_router(recommendations.router, prefix="/api")
 app.include_router(itineraries.router, prefix="/api")
+app.include_router(demo.router, prefix="/api")
 app.include_router(evaluation.router, prefix="/api")
 app.include_router(meta.router, prefix="/api")
 

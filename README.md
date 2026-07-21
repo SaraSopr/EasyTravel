@@ -762,15 +762,15 @@ balance = min(candidates per day) / mean(candidates per day)
 
 ### Selection–sequencing decomposition
 
-The multi-vehicle solver optimises POI selection and day assignment well but leaves each day's visiting order ~1.6× longer than a tight TSP. A second **single-vehicle TSPTW pass** re-sequences each day to minimise real travel time while respecting opening hours, without changing which POIs are on the day. This runs in milliseconds on a typical day (8–12 nodes) and is executed before meal insertion so meals are placed along the final compact route.
-
-### Meal insertion
-
-Meals are **not** solver nodes — they are inserted as a post-pass. The daily budget reserves `toptw_meal_reserve_min = 150 min` for meals (`budget = day_duration − 150 min`). After sequencing, times are propagated from the day start using real travel times; when the clock reaches the lunch or dinner window, the best open restaurant near the current route position is inserted (scored by proximity + rating, with a takeaway penalty). The food pool is shared across days.
+The multi-vehicle solver optimises POI selection and day assignment well but leaves each day's visiting order ~1.6× longer than a tight TSP. A second **single-vehicle TSPTW pass** re-sequences each day to minimise real travel time while respecting opening hours, without changing which POIs are on the day. The compact route is used for the under-full decision; if filling triggers a second TOPTW solve, its routes are re-sequenced again before meal insertion.
 
 ### Under-full day filling
 
-With pre-clustering active, a compact zone with short visits can exhaust its POIs by mid-afternoon while other days run full. When a day's used time falls below `toptw_underfull_fill_ratio × budget` (default 70%), the solver borrows extra unused POIs from the activity pool within `toptw_underfull_borrow_radius_m = 2000 m` of the day's centroid, pins them to that day, and re-solves. Already-full days keep their pins. Active by default; disable via env for thesis A/B baseline runs.
+With pre-clustering active, a compact zone with short visits can exhaust its POIs by mid-afternoon while other days run full. When the compact route's activity load falls below `toptw_underfull_fill_ratio × budget` (default 70%), the solver borrows extra unused POIs from the activity pool within `toptw_underfull_borrow_radius_m = 2000 m` of the day's centroid, pins them to that day, and re-solves. Telemetry distinguishes candidates injected into the second solve from those actually retained. Active by default; disable via env for thesis A/B baseline runs.
+
+### Meal insertion
+
+Meals are **not** solver nodes — they are inserted as a post-pass after filling and final sequencing. The daily budget reserves `toptw_meal_reserve_min = 150 min` for meals (`budget = day_duration − 150 min`). Times are propagated from the day start using real travel times; when the clock reaches the lunch or dinner window, the best open restaurant near the current route position is inserted (scored by proximity + rating, with a takeaway penalty). The food pool is shared across days.
 
 ### Approximations and limitations
 

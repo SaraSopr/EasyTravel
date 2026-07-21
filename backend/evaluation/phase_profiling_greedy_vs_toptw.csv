@@ -1,0 +1,13 @@
+city,profile,days,solver,routing,wall_ms,stops,activity_propagate,clustering,meal_insertion,mmr_select,pass1_select,pre_cluster,prep_common,refill,routing_prefetch,schedulable_filter,schedule_day_total,select_candidates,solve,toptw_plan_total,tsp_reorder,tsptw_reorder,underfull_fill
+Roma,couple_foodie,2,greedy,real,1067.1,18,0.11,297.14,0.93,180.76,2.86,,28.09,0.12,371.44,,188.24,,,,183.14,,
+Roma,couple_foodie,2,toptw,real,400.52,21,,,1.08,,,29.5,13.49,,260.37,0.26,,0.74,82.26,386.1,,11.35,0.07
+Roma,couple_foodie,2,greedy,estimated,217.37,19,0.07,22.93,0.59,179.18,1.13,,10.11,0.07,,,4.39,,,,1.78,,
+Roma,couple_foodie,2,toptw,estimated,99.98,20,,,1.08,,,22.68,7.73,,,0.29,,0.49,55.56,92.21,,12.02,0.05
+Madrid,family_toddlers,4,greedy,real,906.94,26,0.23,27.5,5.18,182.05,5.66,,15.35,0.21,658.75,,21.29,,,,7.52,,
+Madrid,family_toddlers,4,toptw,real,391.94,33,,,2.16,,,28.41,14.43,,269.43,0.48,,0.78,50.84,377.43,,24.8,0.08
+Madrid,family_toddlers,4,greedy,estimated,183.35,31,0.11,23.84,2.25,138.34,2.18,,11.11,0.1,,,9.26,,,,3.39,,
+Madrid,family_toddlers,4,toptw,estimated,105.71,33,,,2.21,,,21.2,7.59,,,0.48,,0.46,53.76,98.08,,19.86,0.07
+Porto,young_solo_outdoor,2,greedy,real,497.54,22,0.16,23.26,1.58,168.68,3.1,,11.41,0.06,282.7,,9.9,,,,3.81,,
+Porto,young_solo_outdoor,2,toptw,real,282.27,23,,,1.55,,,22.41,8.86,,180.09,0.26,,0.54,47.3,273.35,,20.86,0.06
+Porto,young_solo_outdoor,2,greedy,estimated,187.87,23,0.09,21.41,0.86,150.11,1.5,,10.0,0.04,,,5.66,,,,2.25,,
+Porto,young_solo_outdoor,2,toptw,estimated,63.58,26,,,1.53,,,20.17,7.36,,,0.27,,0.48,12.62,56.17,,21.02,0.05

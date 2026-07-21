@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from app.config import settings
+from app.services import _phase_timer as _pt  # phase profiling, see PHASE_PROFILING_ENABLED
 from app.services.itinerary_planner import (
     DINNER_MIN_H,
     DINNER_TARGET_H,
@@ -231,6 +232,33 @@ def _build_travel_seconds(
     return matrix
 
 
+def _route_used_seconds(
+    ordered: list[tuple["Poi", float]],
+    travel_lookup: "TravelLookup",
+    walk_threshold_m: float,
+    start_lat: float,
+    start_lng: float,
+) -> int:
+    """Return productive route load: inbound/inter-stop travel plus visit time.
+
+    Waiting, meals and the optional return to the depot are deliberately excluded:
+    this is the same activity load compared with the meal-reserved TOPTW budget by
+    the under-full pass. Callers must pass the compact/reordered route, otherwise a
+    poor solver sequence can look "full" merely because it contains excess travel.
+    """
+    used = 0
+    prev_id, prev_lat, prev_lng = None, start_lat, start_lng
+    for poi, sim in ordered:
+        _, travel_min = _travel(
+            prev_id, prev_lat, prev_lng, poi.id, poi.lat, poi.lng,
+            travel_lookup, walk_threshold_m,
+        )
+        _, visit_dur, _ = resolve_visit_mode(poi, sim)
+        used += int((travel_min + visit_dur) * 60)
+        prev_id, prev_lat, prev_lng = poi.id, poi.lat, poi.lng
+    return used
+
+
 def _solve(
     candidates: list[tuple["Poi", float, float]],
     num_days: int,
@@ -271,9 +299,11 @@ def _solve(
 
     # Replicas, grouped by POI for the disjunction.
     replicas_by_poi: dict[object, list[int]] = {}
+    replicas_by_day_type: dict[tuple[int, str], list[int]] = {}
     for poi, prize, sim in candidates:
         _, visit_dur, _ = resolve_visit_mode(poi, sim)
         service_s = int(visit_dur * 60)
+        primary_type = (poi.types or [""])[0]
         google_days = [(d.weekday() + 1) % 7 for d in day_dates]
         pinned_day = day_assignment.get(poi.id) if day_assignment is not None else None
         for day, gday in enumerate(google_days):
@@ -282,11 +312,16 @@ def _solve(
             window = time_window_seconds(poi, gday, day_start_min, day_total_s)
             if window is None:
                 continue  # closed that day → no replica
+            open_s, close_s = window
+            latest_start_s = close_s - service_s
+            if latest_start_s < open_s:
+                continue  # the visit cannot finish before closing
             node = _Node(poi.lat, poi.lng, poi=poi, day=day, sim=sim, prize=prize, service_s=service_s)
-            node.window = window
+            node.window = (open_s, latest_start_s)
             idx = len(nodes)
             nodes.append(node)
             replicas_by_poi.setdefault(poi.id, []).append(idx)
+            replicas_by_day_type.setdefault((day, primary_type), []).append(idx)
 
     if not replicas_by_poi:
         return None
@@ -340,6 +375,19 @@ def _solve(
         ris = [manager.NodeToIndex(i) for i in indices]
         prize = nodes[indices[0]].prize
         routing.AddDisjunction(ris, int(max(prize, 0.0) * prize_scale), 1)
+
+    # Enforce the same per-day repetition caps used by the final scheduler. Without
+    # these constraints the solver can count a route as full and the scheduler can
+    # subsequently discard repeated churches/attractions, reopening a large gap.
+    cp_solver = routing.solver()
+    for (_day, primary_type), indices in replicas_by_day_type.items():
+        cap = _PRIMARY_TYPE_DAY_CAP.get(primary_type)
+        if cap is not None:
+            cp_solver.Add(
+                cp_solver.Sum([
+                    routing.ActiveVar(manager.NodeToIndex(i)) for i in indices
+                ]) <= cap
+            )
 
     params = pywrapcp.DefaultRoutingSearchParameters()
     params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
@@ -402,7 +450,14 @@ def _reorder_day_tsptw(
     for poi, sim in ordered:
         _, visit_dur, _ = resolve_visit_mode(poi, sim)
         node = _Node(poi.lat, poi.lng, poi=poi, sim=sim, service_s=int(visit_dur * 60))
-        node.window = time_window_seconds(poi, gday, day_start_min, day_total_s)
+        window = time_window_seconds(poi, gday, day_start_min, day_total_s)
+        if window is None:
+            return ordered
+        open_s, close_s = window
+        latest_start_s = close_s - node.service_s
+        if latest_start_s < open_s:
+            return ordered
+        node.window = (open_s, latest_start_s)
         poi_nodes.append(node)
     # nodes: [start depot] + activities + [zero-cost dummy end] → open path
     nodes = [_Node(s_lat, s_lng), *poi_nodes, _Node(s_lat, s_lng)]
@@ -577,7 +632,7 @@ def schedule_day_route(
         cur_id = food_poi.id
         return True
 
-    def _try_insert_meal(target: datetime) -> bool:
+    def _try_insert_meal(target: datetime, floor_dt: datetime | None = None) -> bool:
         # Probe restaurant openness at the meal hour, not at ``cur``. When a day's
         # activities end inside the restaurants' afternoon closing break (e.g. last
         # stop at 17:19), probing at ``cur`` finds every candidate shut and drops the
@@ -596,6 +651,15 @@ def schedule_day_route(
             )
         if fp is None:
             return False
+        if floor_dt is not None:
+            _, fp_travel = _travel(cur_id, cur_lat, cur_lng, fp.id, fp.lat, fp.lng,
+                                   travel_lookup, walk_threshold_m)
+            arrival = cur + timedelta(minutes=fp_travel)
+            _, food_dur, _ = resolve_visit_mode(fp, 1.0)
+            forced = min(max(arrival, floor_dt), end_dt - timedelta(minutes=food_dur))
+            if forced < arrival:
+                return False
+            return _add_food_stop(fp, forced_arrival=forced)
         return _add_food_stop(fp)
 
     def _add_activity_stop(poi: "Poi", sim_score: float) -> str:
@@ -629,6 +693,15 @@ def schedule_day_route(
         departure = arrival + timedelta(minutes=vd)
         if departure > end_dt:
             return "full"
+        # Arrival-only checks allow entering just before closing for a long visit.
+        # Mirror the solver's latest-start bound during the final propagation too.
+        gday = (day_date.weekday() + 1) % 7
+        day_start_min = start_dt.hour * 60 + start_dt.minute
+        day_total_s = int((end_dt - start_dt).total_seconds())
+        window = time_window_seconds(poi, gday, day_start_min, day_total_s)
+        departure_s = int((departure - start_dt).total_seconds())
+        if window is None or departure_s > window[1]:
+            return "skip"
         # Reserve the dinner slot (mirror the greedy guard): if placing this activity
         # would leave no room for dinner before end_dt (15 min conservative travel),
         # stop the day here so the post-loop can still insert dinner.
@@ -651,17 +724,37 @@ def schedule_day_route(
         cur_id = poi.id
         return "added"
 
+    _dinner_floor = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
+
     for poi, sim in ordered_activities:
         if not lunch_inserted and cur >= lunch_target - timedelta(minutes=MEAL_WINDOW_MIN):
             lunch_inserted = _try_insert_meal(lunch_target) or lunch_inserted
         if not dinner_inserted and cur >= dinner_target - timedelta(minutes=MEAL_WINDOW_MIN):
             dinner_inserted = _try_insert_meal(dinner_target) or dinner_inserted
+        # Look-ahead: if adding this activity would push cur past the dinner window,
+        # insert dinner now (with DINNER_MIN_H floor) before the activity swallows the slot.
+        if not dinner_inserted:
+            _, _la_act_travel = _travel(cur_id, cur_lat, cur_lng, poi.id, poi.lat, poi.lng,
+                                        travel_lookup, walk_threshold_m)
+            _, _la_act_dur, _ = resolve_visit_mode(poi, sim)
+            if cur + timedelta(minutes=_la_act_travel + _la_act_dur) >= dinner_target - timedelta(minutes=MEAL_WINDOW_MIN):
+                dinner_inserted = _try_insert_meal(dinner_target, floor_dt=_dinner_floor) or dinner_inserted
         result = _add_activity_stop(poi, sim)
         if result == "full":
             break
         # "skip" (type cap) → just move on to the next activity.
 
-    # Post-loop: insert any meal not yet placed (e.g. all activities ended early).
+    # After the loop ends (exhausted or broke on "full"), check meals one more time at
+    # the current position.  In greedy the check fires at the start of the next
+    # iteration after cur crosses the window; in TOPTW there may be no next iteration,
+    # so we do it explicitly here.  _try_insert_meal uses cur + travel (no floor), so
+    # times are dynamic — exactly like the greedy in-loop insertion.
+    if not lunch_inserted and cur >= lunch_target - timedelta(minutes=MEAL_WINDOW_MIN):
+        lunch_inserted = _try_insert_meal(lunch_target) or lunch_inserted
+    if not dinner_inserted and cur >= dinner_target - timedelta(minutes=MEAL_WINDOW_MIN):
+        dinner_inserted = _try_insert_meal(dinner_target) or dinner_inserted
+
+    # Post-loop fallback: insert any meal not yet placed (e.g. all activities ended early).
     # Only if the day actually has activities — a food-only day makes no sense.
     if activity_count and not lunch_inserted:
         if _try_insert_meal(lunch_target):
@@ -727,6 +820,7 @@ async def plan(
     session=None,
     max_food_price_level: int | None = None,
     walk_threshold_m: float = DEFAULT_WALK_THRESHOLD_M,
+    trace: dict | None = None,  # demo visualiser: passive snapshot recording only
 ) -> tuple[list[list[_Stop]], list[str]]:
     """Plan a multi-day itinerary with the TOPTW solver.
 
@@ -739,13 +833,21 @@ async def plan(
     warnings: list[str] = []
 
     n = settings.toptw_num_candidates
+    _pt_t_select = _pt.start()  # phase profiling
     candidates = select_candidates(
         activity_pois, uvec, popularity_scores,
         confirmed_visited_ids, previously_suggested_ids,
         n, settings.toptw_w_sim, settings.toptw_w_pop,
     )
+    _pt.stop("select_candidates", _pt_t_select)  # phase profiling
     if not candidates:
         return [], ["No activity candidates available for this city."]
+
+    if trace is not None:
+        # Snapshot the global top-N here, before pre-clustering rebuilds/prunes
+        # the list below — the demo's "select candidates" step must show the
+        # top-N the caption claims. The kept set is recoverable from "zones".
+        trace["candidates"] = [str(c[0].id) for c in candidates]
 
     # --- Geographic pre-clustering: pin each POI to one day's cluster ---
     # Keeps every day spatially compact, at the cost of the solver's freedom to
@@ -756,6 +858,7 @@ async def plan(
     # tail); "auto" detects that via the cluster balance and falls back to global
     # TOPTW. "on"/"off" force the choice (thesis A/B).
     day_assignment: dict | None = None
+    _pt_t_precluster = _pt.start()  # phase profiling
     mode = (settings.toptw_pre_cluster_mode or "auto").strip().lower()
     if mode != "off" and num_days > 1:
         from app.services.itinerary_planner import (
@@ -844,6 +947,8 @@ async def plan(
                         "TOPTW pruned %d intra-cluster outlier(s) (max_nn=%.0fm) sizes=%s",
                         len(dropped_ids), settings.toptw_cluster_outlier_max_nn_m, sizes,
                     )
+                if trace is not None:
+                    trace["pruned"] = [str(pid) for pid in dropped_ids]
             day_assignment = {p.id: day for day, pois in cand_by_day.items() for p in pois}
             logger.info(
                 "TOPTW pre-cluster ON (mode=%s balance=%.2f sizes=%s pool=%s)",
@@ -855,6 +960,14 @@ async def plan(
                 "TOPTW pre-cluster OFF (mode=%s balance=%.2f < %.2f sizes=%s) → global TOPTW",
                 mode, balance, settings.toptw_cluster_balance_min, sizes,
             )
+
+        if trace is not None:
+            trace["zones"] = {str(p.id): d for d, ps in cand_by_day.items() for p in ps}
+            trace["balance"] = round(balance, 3)
+    _pt.stop("pre_cluster", _pt_t_precluster)  # phase profiling
+
+    if trace is not None:
+        trace["pre_cluster_active"] = day_assignment is not None
 
     # Depots default to the city center.
     s_lat = start_lat if start_lat is not None else city_lat
@@ -874,12 +987,14 @@ async def plan(
     # --- Pre-fetch the real travel matrix for the candidate POIs (one batch) ---
     travel_lookup: TravelLookup = {}
     if session is not None and settings.routes_api_enabled:
+        _pt_t_prefetch1 = _pt.start()  # phase profiling
         try:
             travel_lookup = await prefetch_travel_matrix(
                 session, [c[0] for c in candidates], walk_threshold_m
             )
         except Exception as exc:  # routing must never block generation
             logger.warning("TOPTW travel-matrix prefetch failed (%s) — using haversine", exc)
+        _pt.stop("routing_prefetch", _pt_t_prefetch1)  # phase profiling
 
     logger.info(
         "TOPTW: %d candidates, %d days, budget=%dmin (day=%dmin, meal_reserve=%dmin)",
@@ -887,6 +1002,7 @@ async def plan(
     )
 
     loop = asyncio.get_event_loop()
+    _pt_t_solve1 = _pt.start()  # phase profiling
     solver_days = await loop.run_in_executor(
         None,
         _solve,
@@ -895,6 +1011,7 @@ async def plan(
         settings.toptw_prize_scale, settings.toptw_time_limit_s,
         day_assignment, walk_threshold_m, settings.toptw_solution_limit,
     )
+    _pt.stop("solve", _pt_t_solve1)  # phase profiling
 
     if solver_days is None:
         warnings.append("The optimiser could not build an itinerary; try fewer days or another city.")
@@ -903,36 +1020,117 @@ async def plan(
     included = sum(len(d) for d in solver_days)
     logger.info("TOPTW solved: %d activity stops assigned across %d days", included, num_days)
 
+    def _schedulable_activity_routes(
+        routes: list[list[tuple["Poi", float]]],
+    ) -> tuple[list[list[tuple["Poi", float]]], dict[int, list[_Stop]]]:
+        """Apply the final activity propagation rules without inserting meals.
+
+        This keeps fullness and the production result on the same set of activities
+        if opening-hour propagation or a defensive scheduler guard rejects a node.
+        """
+        filtered_routes: list[list[tuple["Poi", float]]] = []
+        stops_by_day: dict[int, list[_Stop]] = {}
+        for day_idx, ordered in enumerate(routes):
+            if not ordered:
+                filtered_routes.append([])
+                continue
+            day_date = day_dates[day_idx]
+            stops = schedule_day_route(
+                ordered, [], set(),
+                day_date,
+                day_date.replace(hour=sh, minute=sm, second=0),
+                day_date.replace(hour=eh, minute=em, second=0),
+                s_lat, s_lng, popularity_scores, travel_lookup,
+                max_food_price_level, walk_threshold_m,
+            )
+            route_by_id = {poi.id: (poi, sim) for poi, sim in ordered}
+            filtered = [
+                route_by_id[stop.poi.id]
+                for stop in stops
+                if stop.poi.id in route_by_id
+            ]
+            filtered_routes.append(filtered)
+            stops_by_day[day_idx] = stops
+        return filtered_routes, stops_by_day
+
+    # Tighten the initial solver routes before deciding whether a day is under-full.
+    # Measuring the raw multi-vehicle order over-counts avoidable travel and can label
+    # a day above-threshold even though the TSPTW pass later exposes a large gap.
+    if trace is not None:
+        trace["pre_reorder"] = {
+            day_idx: [str(poi.id) for poi, _ in ordered]
+            for day_idx, ordered in enumerate(solver_days)
+        }
+    _pt_t_reorder1 = _pt.start()  # phase profiling
+    if settings.toptw_reorder_days:
+        solver_days = [
+            _reorder_day_tsptw(
+                ordered, travel_lookup, walk_threshold_m, s_lat, s_lng,
+                day_start_min, day_total_s, day_dates[day_idx],
+                settings.toptw_solution_limit,
+            )
+            for day_idx, ordered in enumerate(solver_days)
+        ]
+    _pt.stop("tsptw_reorder", _pt_t_reorder1)  # phase profiling
+    _pt_t_filter1 = _pt.start()  # phase profiling
+    solver_days, initial_pre_meal_stops = _schedulable_activity_routes(solver_days)
+    _pt.stop("schedulable_filter", _pt_t_filter1)  # phase profiling
+    final_pre_meal_stops = initial_pre_meal_stops
+    if trace is not None:
+        trace["post_reorder"] = {
+            day_idx: [str(poi.id) for poi, _ in ordered]
+            for day_idx, ordered in enumerate(solver_days)
+        }
+        # A genuine pre-meal snapshot for the demo's reorder step. Keeping _Stop
+        # objects in this passive internal hook avoids approximating timings later.
+        trace["post_reorder_stops"] = initial_pre_meal_stops
+
     # --- Optional: fill under-filled days by borrowing nearby unused candidates ---
     # With pinning ON each POI is locked to one day, so a sparse/short-visit zone
     # (e.g. a compact city centre) can leave its day ending mid-afternoon while the
-    # other days run full — the forced-19:00 dinner then opens a dead gap. When a
-    # day's scheduled time falls below ``underfull_fill_ratio * budget``, pull extra
-    # candidates from the *unused* activity pool near that day's own centroid, pin
-    # them to that day, and re-solve. The full days keep their pins, so they stay
-    # compact; only the under-full day gains options.
-    if settings.toptw_fill_underfull_days and day_assignment is not None and solver_days:
-        def _route_used_s(ordered: list) -> int:
-            used = 0
-            prev_id, prev_lat, prev_lng = None, s_lat, s_lng
-            for poi, sim in ordered:
-                _, tmin = _travel(
-                    prev_id, prev_lat, prev_lng, poi.id, poi.lat, poi.lng,
-                    travel_lookup, walk_threshold_m,
-                )
-                _, visit_dur, _ = resolve_visit_mode(poi, sim)
-                used += int((tmin + visit_dur) * 60)
-                prev_id, prev_lat, prev_lng = poi.id, poi.lat, poi.lng
-            return used
+    # other days run full. Fullness is activity load (compact-route travel + visits)
+    # against the meal-reserved budget; it is not the final itinerary's idle time.
+    _pt_t_fill = _pt.start()  # phase profiling
+    fill_floor_s = int(settings.toptw_underfull_fill_ratio * budget_s)
+    fill_days: dict[int, dict] = {}
+    fill_applicable = (
+        settings.toptw_fill_underfull_days
+        and day_assignment is not None
+        and bool(solver_days)
+    )
+    for day_idx, ordered in enumerate(solver_days):
+        used_s = _route_used_seconds(
+            ordered, travel_lookup, walk_threshold_m, s_lat, s_lng
+        )
+        if not settings.toptw_fill_underfull_days:
+            status = "disabled"
+        elif day_assignment is None:
+            status = "not_applicable_global"
+        elif not ordered:
+            status = "empty_no_anchor"
+        elif used_s >= fill_floor_s:
+            status = "above_threshold"
+        else:
+            status = "underfull_pending"
+        fill_days[day_idx] = {
+            "status": status,
+            "used_s_before": used_s,
+            "used_s_after": used_s,
+            "injected": [],
+            "scheduled": [],
+        }
 
+    # Snapshot for the per-day revert guards: the global re-solve (and the meal
+    # insertion after it) can leave a day worse than before the fill.
+    pre_fill_routes: list[list[tuple["Poi", float]]] | None = None
+
+    if fill_applicable:
         used_ids = {c[0].id for c in candidates}
-        fill_floor = settings.toptw_underfull_fill_ratio * budget_s
         extra_added = 0
         for day_idx, ordered in enumerate(solver_days):
-            if not ordered:
-                continue  # a truly empty day has no anchor to borrow around
-            if _route_used_s(ordered) >= fill_floor:
-                continue  # day already well-filled
+            day_fill = fill_days[day_idx]
+            if day_fill["status"] != "underfull_pending":
+                continue
             c_lat = sum(p.lat for p, _ in ordered) / len(ordered)
             c_lng = sum(p.lng for p, _ in ordered) / len(ordered)
             pool: list[tuple[float, float, float, "Poi"]] = []
@@ -955,6 +1153,7 @@ async def plan(
                 )
                 pool.append((dist, prize, sim, poi))
             if not pool:
+                day_fill["status"] = "underfull_no_candidates"
                 continue
             # Nearest first keeps the day compact; among the closest, prefer prize.
             pool.sort(key=lambda t: t[0])
@@ -965,10 +1164,13 @@ async def plan(
                 day_assignment[poi.id] = day_idx
                 used_ids.add(poi.id)
                 extra_added += 1
+                day_fill["injected"].append(str(poi.id))
+            day_fill["status"] = "candidates_injected"
 
         if extra_added:
             logger.info(
-                "TOPTW under-full fill: added %d extra candidate(s) → re-solving", extra_added
+                "TOPTW under-full fill: injected %d extra candidate(s) → re-solving",
+                extra_added,
             )
             # Refresh the matrix so the new POIs' legs use real cached times, not haversine.
             if session is not None and settings.routes_api_enabled:
@@ -978,6 +1180,7 @@ async def plan(
                     )
                 except Exception as exc:
                     logger.warning("TOPTW re-solve travel-matrix prefetch failed (%s)", exc)
+            pre_fill_routes = [list(ordered) for ordered in solver_days]
             resolved = await loop.run_in_executor(
                 None,
                 _solve,
@@ -988,12 +1191,90 @@ async def plan(
             )
             if resolved is not None:
                 solver_days = resolved
+                # The re-solve changes each route's order, so compact it again before
+                # recording the actual post-fill load and before meal insertion.
+                if settings.toptw_reorder_days:
+                    solver_days = [
+                        _reorder_day_tsptw(
+                            ordered, travel_lookup, walk_threshold_m, s_lat, s_lng,
+                            day_start_min, day_total_s, day_dates[day_idx],
+                            settings.toptw_solution_limit,
+                        )
+                        for day_idx, ordered in enumerate(solver_days)
+                    ]
+                solver_days, final_pre_meal_stops = _schedulable_activity_routes(solver_days)
+                for day_idx, ordered in enumerate(solver_days):
+                    day_fill = fill_days[day_idx]
+                    injected = set(day_fill["injected"])
+                    scheduled = [
+                        str(poi.id) for poi, _ in ordered if str(poi.id) in injected
+                    ]
+                    day_fill["scheduled"] = scheduled
+                    day_fill["used_s_after"] = _route_used_seconds(
+                        ordered, travel_lookup, walk_threshold_m, s_lat, s_lng
+                    )
+                    # Revert guard: the global re-solve can degrade a day it had
+                    # already placed well (drop or shuffle POIs) — including days
+                    # that received no injected candidates at all.
+                    if day_fill["used_s_after"] < day_fill["used_s_before"]:
+                        solver_days[day_idx] = pre_fill_routes[day_idx]
+                        if day_idx in initial_pre_meal_stops:
+                            final_pre_meal_stops[day_idx] = initial_pre_meal_stops[day_idx]
+                        else:
+                            final_pre_meal_stops.pop(day_idx, None)
+                        day_fill["scheduled"] = []
+                        day_fill["used_s_after"] = day_fill["used_s_before"]
+                        if injected:
+                            day_fill["status"] = "fill_reverted"
+                        logger.info(
+                            "TOPTW under-full fill: day %d re-solve degraded the "
+                            "route → restored the pre-fill day", day_idx + 1,
+                        )
+                        continue
+                    if injected:
+                        if not scheduled:
+                            day_fill["status"] = "underfull_candidates_rejected"
+                        elif day_fill["used_s_after"] >= fill_floor_s:
+                            day_fill["status"] = "filled"
+                        else:
+                            day_fill["status"] = "partially_filled"
                 logger.info(
                     "TOPTW re-solved: %d activity stops across %d days",
                     sum(len(d) for d in solver_days), num_days,
                 )
+            else:
+                for day_fill in fill_days.values():
+                    if day_fill["status"] == "candidates_injected":
+                        day_fill["status"] = "resolve_failed"
+        else:
+            for day_fill in fill_days.values():
+                if day_fill["status"] == "underfull_pending":
+                    day_fill["status"] = "underfull_no_candidates"
+    _pt.stop("underfull_fill", _pt_t_fill)  # phase profiling
+
+    if trace is not None:
+        trace["fill"] = {
+            "enabled": settings.toptw_fill_underfull_days,
+            "applicable": fill_applicable,
+            "ratio": settings.toptw_underfull_fill_ratio,
+            "budget_s": budget_s,
+            "threshold_s": fill_floor_s,
+            "days": fill_days,
+        }
+        trace["pre_meal_stops"] = final_pre_meal_stops
 
     # --- Per-day: meal post-insertion + time propagation (shared food pool) ---
+    def _surviving_load(
+        route: list[tuple["Poi", float]], day_stops: list[_Stop],
+    ) -> int:
+        """Activity load of the route's POIs that survived meal insertion."""
+        surviving = {stop.poi.id for stop in day_stops}
+        return _route_used_seconds(
+            [(poi, sim) for poi, sim in route if poi.id in surviving],
+            travel_lookup, walk_threshold_m, s_lat, s_lng,
+        )
+
+    _pt_t_meal_toptw = _pt.start()  # phase profiling
     all_days: list[list[_Stop]] = []
     used_food_ids: set = set()
     for day_idx, ordered in enumerate(solver_days):
@@ -1005,15 +1286,8 @@ async def plan(
             warnings.append(f"Day {day_idx + 1} has no scheduled activities.")
             continue
 
-        # Stage 2: tighten the day's visiting order (the multi-vehicle solver leaves
-        # it ~1.6x longer than a TSP). Runs before meal insertion so meals are placed
-        # along the final, compact route.
-        if settings.toptw_reorder_days:
-            ordered = _reorder_day_tsptw(
-                ordered, travel_lookup, walk_threshold_m, s_lat, s_lng,
-                day_start_min, day_total_s, day_date, settings.toptw_solution_limit,
-            )
-
+        day_fill = fill_days[day_idx]
+        food_ids_before = set(used_food_ids)
         available_food = [p for p in food_pois if p.id not in used_food_ids]
         stops = schedule_day_route(
             ordered, available_food, used_food_ids,
@@ -1021,10 +1295,83 @@ async def plan(
             popularity_scores, travel_lookup, max_food_price_level,
             walk_threshold_m,
         )
+
+        # End-to-end revert guard: meal insertion can turn the fill's gain into
+        # a loss — a borrowed POI with an afternoon-only window drags the whole
+        # day late and pushes better POIs past the day end. Schedule the
+        # pre-fill route too and keep whichever retains more activity load.
+        if day_fill["scheduled"] and pre_fill_routes is not None:
+            alt_ordered = pre_fill_routes[day_idx]
+            alt_food_ids = set(food_ids_before)
+            alt_stops = schedule_day_route(
+                alt_ordered,
+                [p for p in food_pois if p.id not in alt_food_ids],
+                alt_food_ids, day_date, start_dt, end_dt, s_lat, s_lng,
+                popularity_scores, travel_lookup, max_food_price_level,
+                walk_threshold_m,
+            ) if alt_ordered else []
+            if alt_stops and (
+                not stops
+                or _surviving_load(alt_ordered, alt_stops)
+                > _surviving_load(ordered, stops)
+            ):
+                ordered, stops = alt_ordered, alt_stops
+                used_food_ids.clear()
+                used_food_ids.update(alt_food_ids)
+                day_fill["scheduled"] = []
+                day_fill["status"] = "fill_reverted"
+                if day_idx in initial_pre_meal_stops:
+                    final_pre_meal_stops[day_idx] = initial_pre_meal_stops[day_idx]
+                logger.info(
+                    "TOPTW under-full fill: day %d ended up worse after meal "
+                    "insertion → restored the pre-fill day", day_idx + 1,
+                )
+
         if not stops:
+            if day_fill["injected"]:
+                day_fill["scheduled"] = []
+                day_fill["status"] = "underfull_candidates_rejected"
             warnings.append(f"Day {day_idx + 1} has no schedulable activities.")
             continue
+        # Meals can still shift the propagated route. Keep fill telemetry tied to
+        # activities that survive in the itinerary returned to the caller.
+        ordered_activity_ids = {poi.id for poi, _ in ordered}
+        actual_activity_ids = {
+            stop.poi.id for stop in stops if stop.poi.id in ordered_activity_ids
+        }
+        actual_ordered = [
+            (poi, sim) for poi, sim in ordered if poi.id in actual_activity_ids
+        ]
+        injected = set(day_fill["injected"])
+        if day_fill["status"] == "fill_reverted":
+            day_fill["used_s_after"] = _route_used_seconds(
+                actual_ordered, travel_lookup, walk_threshold_m, s_lat, s_lng
+            )
+        elif injected:
+            scheduled = [
+                str(poi.id) for poi, _ in actual_ordered if str(poi.id) in injected
+            ]
+            day_fill["scheduled"] = scheduled
+            day_fill["used_s_after"] = _route_used_seconds(
+                actual_ordered, travel_lookup, walk_threshold_m, s_lat, s_lng
+            )
+            if not scheduled:
+                day_fill["status"] = "underfull_candidates_rejected"
+            elif day_fill["used_s_after"] >= fill_floor_s:
+                day_fill["status"] = "filled"
+            else:
+                day_fill["status"] = "partially_filled"
         all_days.append(stops)
+        if trace is not None:
+            trace.setdefault("returned_day_indices", []).append(day_idx)
+    _pt.stop("meal_insertion", _pt_t_meal_toptw)  # phase profiling
+
+    if trace is not None:
+        trace["fill_added"] = {
+            day_idx: state["scheduled"]
+            for day_idx, state in fill_days.items()
+            if state["scheduled"]
+        }
 
     # POIs the solver could not place anywhere are dropped silently — opening hours
     # and budget are hard constraints, so there is no "deferred for hours" notion.

@@ -68,9 +68,15 @@ export interface EvalItinerary {
 }
 
 // ── Pairwise ──────────────────────────────────────────
-export async function getPairs(evaluator: string, limit = 30): Promise<EvalPair[]> {
-  const { data } = await client.get('/evaluation/pairs', { params: { evaluator, limit } })
-  return data.pairs
+export interface EvalPairsPage {
+  pairs: EvalPair[]
+  ratedTotal: number
+  poolTotal: number
+}
+
+export async function getPairs(evaluator: string, city?: string, limit = 30): Promise<EvalPairsPage> {
+  const { data } = await client.get('/evaluation/pairs', { params: { evaluator, city, limit } })
+  return { pairs: data.pairs, ratedTotal: data.rated_total, poolTotal: data.pool_total }
 }
 
 export async function postRating(
@@ -86,9 +92,17 @@ export async function postRating(
 }
 
 // ── Likert ────────────────────────────────────────────
-export async function getEvalItineraries(evaluator: string, limit = 10): Promise<EvalItinerary[]> {
-  const { data } = await client.get('/evaluation/itineraries', { params: { evaluator, limit } })
-  return data.itineraries
+export interface EvalItinerariesPage {
+  itineraries: EvalItinerary[]
+  ratedTotal: number
+  poolTotal: number
+}
+
+export async function getEvalItineraries(
+  evaluator: string, city?: string, limit = 10,
+): Promise<EvalItinerariesPage> {
+  const { data } = await client.get('/evaluation/itineraries', { params: { evaluator, city, limit } })
+  return { itineraries: data.itineraries, ratedTotal: data.rated_total, poolTotal: data.pool_total }
 }
 
 export async function postLikert(payload: {
