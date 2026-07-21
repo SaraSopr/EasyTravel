@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from app.config import settings
+from app.services import _phase_timer as _pt  # phase profiling, see PHASE_PROFILING_ENABLED
 
 if TYPE_CHECKING:
     from app.models.poi import Poi
@@ -1318,6 +1319,7 @@ def _schedule_day(
             eligible.append((fp, haversine_m(_lat, _lng, fp.lat, fp.lng)))
         return pick_best_food(eligible, _pop)
 
+    _pt_t_pass1 = _pt.start()  # phase profiling
     for ap, sim_score in activity_candidates:
         if ap.id in used_activity:
             continue
@@ -1384,11 +1386,15 @@ def _schedule_day(
         except Exception as exc:
             logger.warning("Skipping POI %s during scheduling: %s", getattr(ap, "name", "?"), exc)
 
+    _pt.stop("pass1_select", _pt_t_pass1)  # phase profiling
+
     # --- Pass 2: TSP reorder activities ---
+    _pt_t_tsp = _pt.start()  # phase profiling
     selected_pois = [poi for poi, _ in selected_activities]
     score_by_id = {poi.id: score for poi, score in selected_activities}
     ordered_pois = _solve_tsp(selected_pois, depot_lat, depot_lng)
     ordered_activities = [(poi, score_by_id[poi.id]) for poi in ordered_pois]
+    _pt.stop("tsp_reorder", _pt_t_tsp)  # phase profiling
 
     # --- Pass 3: re-propagate times ---
     final_stops: list[_Stop] = []
@@ -1495,6 +1501,7 @@ def _schedule_day(
     _dinner_floor = day_date.replace(hour=DINNER_MIN_H, minute=0, second=0, microsecond=0)
 
     for act, sim_score in ordered_activities:
+        _pt_t_meal = _pt.start()  # phase profiling
         # Insert lunch before next activity if we've reached the lunch window.
         # Pick the restaurant now based on actual TSP position (cur_lat, cur_lng).
         if not lunch_inserted:
@@ -1542,8 +1549,12 @@ def _schedule_day(
                         used_food.add(_la_fp.id)
                         _add_food_stop(_la_fp, forced_arrival=_la_forced)
                         dinner_inserted = True
+        _pt.stop("meal_insertion", _pt_t_meal)  # phase profiling
 
-        if _add_activity_stop(act, sim_score) == "full":
+        _pt_t_prop = _pt.start()  # phase profiling
+        _add_activity_result = _add_activity_stop(act, sim_score)
+        _pt.stop("activity_propagate", _pt_t_prop)  # phase profiling
+        if _add_activity_result == "full":
             break  # day is full
         # "skip" (per-day type cap) → keep scanning so meals still get their in-loop slot
 
@@ -1552,6 +1563,7 @@ def _schedule_day(
     # skipped for lack of time, in MMR (relevance) order. Opening hours are
     # re-checked here (Pass 1 vetted a different arrival time); end_dt, the
     # dinner slot and per-type caps are enforced by _add_activity_stop. ---
+    _pt_t_refill = _pt.start()  # phase profiling
     deferred_ids = {p.id for p, _ in deferred_activities}
     refill_pool = [
         (ap, s) for ap, s in activity_candidates
@@ -1567,7 +1579,9 @@ def _schedule_day(
         if _add_activity_stop(ap, sim_score) == "added":
             used_activity.add(ap.id)
             logger.info("Refill: added %s after TSP freed up time", ap.name)
+    _pt.stop("refill", _pt_t_refill)  # phase profiling
 
+    _pt_t_postloop_meal = _pt.start()  # phase profiling
     # After loop: insert any meal not yet added (e.g. all activities finished before meal time).
     # Only insert if at least one activity was scheduled — a day with only food stops makes
     # no sense and means all activities were deferred due to opening hours.
@@ -1633,6 +1647,7 @@ def _schedule_day(
             )
         if not dinner_inserted:
             logger.warning("Dinner not inserted for day %s — no time slot available", day_date.date())
+    _pt.stop("meal_insertion", _pt_t_postloop_meal)  # phase profiling
 
     return final_stops, deferred_activities, set()
 
@@ -1747,6 +1762,7 @@ async def generate(
         settings.walk_personalization,
     )
 
+    _pt_t_prep = _pt.start()  # phase profiling
     # POIs classified as "food" always go to the food pool, even if Google types
     # don't include explicit food types (e.g. primary type "point_of_interest").
     food_pois = [p for p in candidate_places if p.travel_category == "food" or is_actual_food_poi(p)]
@@ -1827,6 +1843,7 @@ async def generate(
 
     # Sort food by cosine similarity (global pool, shared across days)
     food_pois.sort(key=lambda p: _cosine_sim(uvec, _poi_vec(p)), reverse=True)
+    _pt.stop("prep_common", _pt_t_prep)  # phase profiling
 
     # --- Dispatch: TOPTW optimiser vs greedy baseline ---
     chosen_solver = (solver or settings.itinerary_solver or "greedy").lower()
@@ -1834,6 +1851,7 @@ async def generate(
         from app.services import toptw_solver
 
         logger.info("Dispatching to TOPTW solver (num_days=%d)", num_days)
+        _pt_t_toptw = _pt.start()  # phase profiling
         toptw_days, toptw_warnings = await toptw_solver.plan(
             activity_pois=activity_pois,
             food_pois=food_pois,
@@ -1855,6 +1873,7 @@ async def generate(
             session=session,
             trace=trace,
         )
+        _pt.stop("toptw_plan_total", _pt_t_toptw)  # phase profiling
         warnings.extend(toptw_warnings)
         elapsed_ms = int((_time_mod.monotonic() - t0) * 1000)
         logger.info(
@@ -1871,8 +1890,10 @@ async def generate(
     today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
 
     # --- Level 1: geographic clustering ---
+    _pt_t_cluster = _pt.start()  # phase profiling
     clusters = _cluster_pois(activity_pois, num_days, city_lat, city_lng)
     clusters = _rebalance_clusters(clusters)
+    _pt.stop("clustering", _pt_t_cluster)  # phase profiling
     actual_days = len(clusters)
     if trace is not None:
         trace["clusters"] = {
@@ -1952,6 +1973,7 @@ async def generate(
         mmr_k = min(len(all_candidates), max(25, estimated_stops * 3))
 
         candidate_pois_only = [p for p, _ in all_candidates]
+        _pt_t_mmr = _pt.start()  # phase profiling
         candidates = _mmr_select(
             candidates=candidate_pois_only,
             uvec=uvec,
@@ -1963,6 +1985,7 @@ async def generate(
             popularity_scores=popularity_scores,
             proximity_km=proximity_km,
         )
+        _pt.stop("mmr_select", _pt_t_mmr)  # phase profiling
 
         from collections import Counter
         cats = Counter(poi.travel_category for poi, _ in candidates)
@@ -1981,14 +2004,17 @@ async def generate(
         # haversine transparently when routing is disabled or a leg has no route.
         travel_lookup: TravelLookup = {}
         if session is not None and settings.routes_api_enabled:
+            _pt_t_prefetch = _pt.start()  # phase profiling
             try:
                 travel_lookup = await prefetch_travel_matrix(
                     session, [p for p, _ in candidates], walk_threshold_m
                 )
             except Exception as exc:  # routing must never block generation
                 logger.warning("Travel-matrix prefetch failed (%s) — using haversine", exc)
+            _pt.stop("routing_prefetch", _pt_t_prefetch)  # phase profiling
 
         # --- Schedule day ---
+        _pt_t_sched = _pt.start()  # phase profiling
         stops, deferred, reserved = await loop.run_in_executor(
             executor,
             _schedule_day,
@@ -2004,6 +2030,7 @@ async def generate(
             max_food_price_level,
             walk_threshold_m,
         )
+        _pt.stop("schedule_day_total", _pt_t_sched)  # phase profiling
 
         if deferred:
             global_deferred.extend(deferred)

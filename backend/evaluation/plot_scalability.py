@@ -1,7 +1,9 @@
-"""Plot RQ1c scalability from scalability_results.csv.
+"""Plot the candidate-pool (N) sweep from scalability_results.csv.
 
 Reads the output of run_scalability.py (a grid of cities × profiles × durations)
-and writes evaluation/figures/fig3_rq1c_scalability.png.
+and writes evaluation/figures/fig5_rq1d_scalability_n.png. (fig3_rq1c_scalability
+is the by-duration figure produced by analysis.py from metrics_2x2.csv — a
+different chart; keep the two filenames distinct.)
 
 Each (city, profile, duration) is one instance. For each solver the figure shows,
 per duration, the mean over instances at each candidate level with a shaded
@@ -99,8 +101,8 @@ def plot(csv_path: str, out_dir: Path) -> None:
     ]
     fig, axes = plt.subplots(1, len(panels), figsize=(18, 5))
     fig.suptitle(
-        "RQ1c — Scalability vs candidate pool size (N): mean over instances, "
-        "IQR band (25–75th pct)\n"
+        "Candidate-pool sweep — quality, feasibility and runtime vs N: "
+        "mean over instances, IQR band (25–75th pct)\n"
         f"({len(instances)} instances = "
         f"{len({i[0] for i in instances})} cities × "
         f"{len({i[1] for i in instances})} profiles × {len(durations)} durations; routing: real)",
@@ -153,7 +155,7 @@ def plot(csv_path: str, out_dir: Path) -> None:
             ax.legend(handles=handles, fontsize=8, frameon=False)
 
     fig.tight_layout()
-    out = out_dir / "fig3_rq1c_scalability.png"
+    out = out_dir / "fig5_rq1d_scalability_n.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {out}  ({len(instances)} instances)")

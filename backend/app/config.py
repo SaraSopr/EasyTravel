@@ -196,6 +196,12 @@ class Settings(BaseSettings):
     dev_mode: bool = False
     dev_user_email: str = ""
 
+    # Per-phase wall-clock profiling for the greedy/TOPTW planners (app.services
+    # ._phase_timer). Off by default — start()/stop() are then near-zero-cost
+    # no-ops. Enable with PHASE_PROFILING_ENABLED=true in .env to measure where
+    # time goes in each planner without any other behaviour change.
+    phase_profiling_enabled: bool = False
+
     model_config = ConfigDict(env_file=".env")
 
 

@@ -33,5 +33,16 @@ SUBSTITUTABLE_MAX_COST_RATIO: float = 1.5  # B travel-cost from depot ≤ this �
 HUMAN_SAMPLE_SIZE: int = 40            # itineraries sampled into the human dashboard
 HUMAN_PRIORITISE_SOLVER_DIFF: bool = True  # prefer cells where greedy/toptw inclusions differ
 
+# Calibration subset: a small, fixed set of pairs (same ones for every evaluator who
+# shares a city, picked deterministically) shown before the per-evaluator random
+# batch. Without this, each evaluator's pairs are drawn independently at random, so
+# with few real evaluators the overlap needed to compute inter-rater agreement
+# (Krippendorff's alpha) is close to empty. Stratified per (pair_type × city): an
+# evaluator who says "I know Roma" only needs to overlap with other Roma raters, not
+# with someone who picked Madrid and has never seen those POIs.
+CALIBRATION_PAIRS_PER_CELL: int = 2    # x3 pair types x3 cities = 18 calibration pairs total
+CALIBRATION_ITINERARIES_PER_CITY: int = 4  # x3 cities = 12 calibration itineraries total
+CALIBRATION_SEED: str = "calibration-set-v1"  # bump to reshuffle the calibration set
+
 # Reproducibility
 RANDOM_SEED: int = 42

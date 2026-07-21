@@ -161,6 +161,18 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
     }, 0)
   }, [fitToDay])
 
+  // Content signature of the selected day. Parents may rebuild the itinerary
+  // object graph on unrelated re-renders (e.g. the eval page maps API data
+  // inline), so keying the reset below on array identity would wipe the
+  // active stop mid-interaction. Compare actual content instead.
+  const daySignature = useMemo(
+    () =>
+      `${itinerary.itinerary_id}:${selectedDay.day_number}:${dayCoords
+        .map((c) => c.join(','))
+        .join(';')}`,
+    [itinerary.itinerary_id, selectedDay.day_number, dayCoords],
+  )
+
   // Fit the map to the selected day's route whenever the day changes.
   useEffect(() => {
     setActiveIndex(0)
@@ -169,7 +181,7 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
     // Reset carousel to the first card.
     const el = carouselRef.current
     if (el) el.scrollTo({ left: 0, behavior: 'auto' })
-  }, [dayCoords, fitToDay])
+  }, [daySignature, fitToDay])
 
   const focusStop = useCallback(
     (index: number, fly: boolean) => {
@@ -194,13 +206,16 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
       rafRef.current = null
       const el = carouselRef.current
       if (!el) return
-      const center = el.scrollLeft + el.clientWidth / 2
+      // offsetLeft is relative to the offsetParent (the page column), not to
+      // this scroll container — on wide viewports the centred `mx-auto` layout
+      // shifts every card by hundreds of px, skewing the nearest-card pick.
+      // Compare centres in viewport coordinates instead.
+      const center = el.getBoundingClientRect().left + el.clientWidth / 2
       let nearest = 0
       let best = Infinity
       Array.from(el.children).forEach((child, i) => {
-        const node = child as HTMLElement
-        const childCenter = node.offsetLeft + node.offsetWidth / 2
-        const dist = Math.abs(childCenter - center)
+        const rect = (child as HTMLElement).getBoundingClientRect()
+        const dist = Math.abs(rect.left + rect.width / 2 - center)
         if (dist < best) {
           best = dist
           nearest = i
@@ -218,11 +233,49 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
     const child = el?.children[index] as HTMLElement | undefined
     if (!el || !child) return
     suppressScrollSync.current = true
-    const left = child.offsetLeft - (el.clientWidth - child.offsetWidth) / 2
+    // `scroll-snap-stop: always` forces the smooth scroll to halt on every
+    // intermediate card, so a jump from card 3 to card 5 would stop (and
+    // re-sync the map) on card 4. Lift snapping for the programmatic scroll
+    // only; manual swipes keep the one-card-per-swipe feel.
+    el.style.scrollSnapType = 'none'
+    // Same viewport-coordinate math as handleScroll: offsetLeft is relative to
+    // the page column, so using it here overshoots the target on wide screens.
+    const elRect = el.getBoundingClientRect()
+    const childRect = child.getBoundingClientRect()
+    const left =
+      el.scrollLeft + (childRect.left - elRect.left) - (el.clientWidth - childRect.width) / 2
     el.scrollTo({ left, behavior: 'smooth' })
-    window.setTimeout(() => {
+
+    // Native smooth-scroll duration varies with distance/browser, so a fixed
+    // timeout can expire mid-animation and let handleScroll re-sync onto
+    // whichever card is nearest at that intermediate position. Instead, wait
+    // for scrollLeft to actually stop moving before releasing the suppression.
+    let lastLeft = el.scrollLeft
+    let stableFrames = 0
+    const deadline = performance.now() + 2000
+    const finish = (node: HTMLElement | null) => {
+      if (node) node.style.scrollSnapType = ''
       suppressScrollSync.current = false
-    }, 450)
+    }
+    const checkSettled = () => {
+      const current = carouselRef.current
+      if (!current) {
+        finish(null)
+        return
+      }
+      if (Math.abs(current.scrollLeft - lastLeft) < 0.5) {
+        stableFrames += 1
+      } else {
+        stableFrames = 0
+        lastLeft = current.scrollLeft
+      }
+      if (stableFrames >= 3 || performance.now() > deadline) {
+        finish(current)
+        return
+      }
+      requestAnimationFrame(checkSettled)
+    }
+    requestAnimationFrame(checkSettled)
   }, [])
 
   const selectStop = useCallback(

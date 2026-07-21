@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from app.config import settings
+from app.services import _phase_timer as _pt  # phase profiling, see PHASE_PROFILING_ENABLED
 from app.services.itinerary_planner import (
     DINNER_MIN_H,
     DINNER_TARGET_H,
@@ -832,11 +833,13 @@ async def plan(
     warnings: list[str] = []
 
     n = settings.toptw_num_candidates
+    _pt_t_select = _pt.start()  # phase profiling
     candidates = select_candidates(
         activity_pois, uvec, popularity_scores,
         confirmed_visited_ids, previously_suggested_ids,
         n, settings.toptw_w_sim, settings.toptw_w_pop,
     )
+    _pt.stop("select_candidates", _pt_t_select)  # phase profiling
     if not candidates:
         return [], ["No activity candidates available for this city."]
 
@@ -855,6 +858,7 @@ async def plan(
     # tail); "auto" detects that via the cluster balance and falls back to global
     # TOPTW. "on"/"off" force the choice (thesis A/B).
     day_assignment: dict | None = None
+    _pt_t_precluster = _pt.start()  # phase profiling
     mode = (settings.toptw_pre_cluster_mode or "auto").strip().lower()
     if mode != "off" and num_days > 1:
         from app.services.itinerary_planner import (
@@ -960,6 +964,7 @@ async def plan(
         if trace is not None:
             trace["zones"] = {str(p.id): d for d, ps in cand_by_day.items() for p in ps}
             trace["balance"] = round(balance, 3)
+    _pt.stop("pre_cluster", _pt_t_precluster)  # phase profiling
 
     if trace is not None:
         trace["pre_cluster_active"] = day_assignment is not None
@@ -982,12 +987,14 @@ async def plan(
     # --- Pre-fetch the real travel matrix for the candidate POIs (one batch) ---
     travel_lookup: TravelLookup = {}
     if session is not None and settings.routes_api_enabled:
+        _pt_t_prefetch1 = _pt.start()  # phase profiling
         try:
             travel_lookup = await prefetch_travel_matrix(
                 session, [c[0] for c in candidates], walk_threshold_m
             )
         except Exception as exc:  # routing must never block generation
             logger.warning("TOPTW travel-matrix prefetch failed (%s) — using haversine", exc)
+        _pt.stop("routing_prefetch", _pt_t_prefetch1)  # phase profiling
 
     logger.info(
         "TOPTW: %d candidates, %d days, budget=%dmin (day=%dmin, meal_reserve=%dmin)",
@@ -995,6 +1002,7 @@ async def plan(
     )
 
     loop = asyncio.get_event_loop()
+    _pt_t_solve1 = _pt.start()  # phase profiling
     solver_days = await loop.run_in_executor(
         None,
         _solve,
@@ -1003,6 +1011,7 @@ async def plan(
         settings.toptw_prize_scale, settings.toptw_time_limit_s,
         day_assignment, walk_threshold_m, settings.toptw_solution_limit,
     )
+    _pt.stop("solve", _pt_t_solve1)  # phase profiling
 
     if solver_days is None:
         warnings.append("The optimiser could not build an itinerary; try fewer days or another city.")
@@ -1052,6 +1061,7 @@ async def plan(
             day_idx: [str(poi.id) for poi, _ in ordered]
             for day_idx, ordered in enumerate(solver_days)
         }
+    _pt_t_reorder1 = _pt.start()  # phase profiling
     if settings.toptw_reorder_days:
         solver_days = [
             _reorder_day_tsptw(
@@ -1061,7 +1071,10 @@ async def plan(
             )
             for day_idx, ordered in enumerate(solver_days)
         ]
+    _pt.stop("tsptw_reorder", _pt_t_reorder1)  # phase profiling
+    _pt_t_filter1 = _pt.start()  # phase profiling
     solver_days, initial_pre_meal_stops = _schedulable_activity_routes(solver_days)
+    _pt.stop("schedulable_filter", _pt_t_filter1)  # phase profiling
     final_pre_meal_stops = initial_pre_meal_stops
     if trace is not None:
         trace["post_reorder"] = {
@@ -1077,6 +1090,7 @@ async def plan(
     # (e.g. a compact city centre) can leave its day ending mid-afternoon while the
     # other days run full. Fullness is activity load (compact-route travel + visits)
     # against the meal-reserved budget; it is not the final itinerary's idle time.
+    _pt_t_fill = _pt.start()  # phase profiling
     fill_floor_s = int(settings.toptw_underfull_fill_ratio * budget_s)
     fill_days: dict[int, dict] = {}
     fill_applicable = (
@@ -1236,6 +1250,7 @@ async def plan(
             for day_fill in fill_days.values():
                 if day_fill["status"] == "underfull_pending":
                     day_fill["status"] = "underfull_no_candidates"
+    _pt.stop("underfull_fill", _pt_t_fill)  # phase profiling
 
     if trace is not None:
         trace["fill"] = {
@@ -1259,6 +1274,7 @@ async def plan(
             travel_lookup, walk_threshold_m, s_lat, s_lng,
         )
 
+    _pt_t_meal_toptw = _pt.start()  # phase profiling
     all_days: list[list[_Stop]] = []
     used_food_ids: set = set()
     for day_idx, ordered in enumerate(solver_days):
@@ -1348,6 +1364,7 @@ async def plan(
         all_days.append(stops)
         if trace is not None:
             trace.setdefault("returned_day_indices", []).append(day_idx)
+    _pt.stop("meal_insertion", _pt_t_meal_toptw)  # phase profiling
 
     if trace is not None:
         trace["fill_added"] = {
