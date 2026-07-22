@@ -163,7 +163,14 @@ function PoiOption({
   )
 }
 
-function PairwisePanel({ evaluator, city }: { evaluator: string; city?: string }) {
+function PairwisePanel({
+  evaluator, city, itinerariesDone, onGoToItineraries,
+}: {
+  evaluator: string
+  city?: string
+  itinerariesDone: boolean
+  onGoToItineraries: () => void
+}) {
   const [pairs, setPairs] = useState<EvalPair[]>([])
   const [idx, setIdx] = useState(0)
   // Cumulative counts across the whole pool (not just this fetched page), so the
@@ -233,7 +240,19 @@ function PairwisePanel({ evaluator, city }: { evaluator: string; city?: string }
   if (loading) return <Centered><Loader2 className="animate-spin text-indigo-500" /></Centered>
   if (!current) {
     if (fetchingMore) return <Centered><Loader2 className="animate-spin text-indigo-500" /></Centered>
-    return <Centered><Done count={ratedTotal} label="i confronti" /></Centered>
+    return (
+      <Centered>
+        <Done count={ratedTotal} label="i confronti" />
+        {!itinerariesDone && (
+          <button
+            onClick={onGoToItineraries}
+            className="mt-10 w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold rounded-xl py-3 shadow-md shadow-indigo-200 active:scale-[0.98] transition-all"
+          >
+            Passa agli itinerari
+          </button>
+        )}
+      </Centered>
+    )
   }
 
   return (
@@ -428,6 +447,18 @@ export default function Evaluation() {
   const city = cityParam && cityParam !== 'any' ? cityParam : undefined
   const [tab, setTab] = useState<Tab>('pairs')
   const [nameInput, setNameInput] = useState('')
+  // Only used to decide whether to show "go to itineraries" on the pairs Done
+  // screen — refreshed whenever the pairs tab is active, a minimal (limit=1)
+  // fetch just for the rated/pool counts.
+  const [itinStatus, setItinStatus] = useState<{ ratedTotal: number; poolTotal: number } | null>(null)
+
+  useEffect(() => {
+    if (!evaluator || cityParam === null || tab !== 'pairs') return
+    void (async () => {
+      const page = await getEvalItineraries(evaluator, city, 1)
+      setItinStatus({ ratedTotal: page.ratedTotal, poolTotal: page.poolTotal })
+    })()
+  }, [evaluator, city, cityParam, tab])
 
   const headerTabs = useMemo(
     () => [
@@ -549,7 +580,14 @@ export default function Evaluation() {
       {/* Content panel overlapping the header */}
       <div className="flex-1 bg-gray-50 rounded-t-3xl -mt-8 px-5 pt-6">
         {tab === 'pairs'
-          ? <PairwisePanel evaluator={evaluator} city={city} />
+          ? (
+            <PairwisePanel
+              evaluator={evaluator}
+              city={city}
+              itinerariesDone={itinStatus !== null && itinStatus.ratedTotal >= itinStatus.poolTotal}
+              onGoToItineraries={() => setTab('likert')}
+            />
+          )
           : <LikertPanel evaluator={evaluator} city={city} />}
       </div>
     </div>
