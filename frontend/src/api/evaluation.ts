@@ -74,7 +74,7 @@ export interface EvalPairsPage {
   poolTotal: number
 }
 
-export async function getPairs(evaluator: string, city?: string, limit = 30): Promise<EvalPairsPage> {
+export async function getPairs(evaluator: string, city?: string, limit = 45): Promise<EvalPairsPage> {
   const { data } = await client.get('/evaluation/pairs', { params: { evaluator, city, limit } })
   return { pairs: data.pairs, ratedTotal: data.rated_total, poolTotal: data.pool_total }
 }
