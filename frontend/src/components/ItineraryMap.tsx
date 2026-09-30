@@ -4,6 +4,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { ItineraryDay } from '@/types'
 import { getCategoryColor } from '@/utils/categoryColors'
+import { BASEMAP_URL, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM } from '@/utils/basemap'
 
 const DAY_PALETTE = [
   { color: '#6366F1', colorLight: '#EEF2FF' },  // indigo-500 — brand day 1
@@ -129,9 +130,9 @@ export default function ItineraryMap({ days }: ItineraryMapProps) {
           attributionControl={true}
         >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>'
-            maxZoom={20}
+            url={BASEMAP_URL}
+            attribution={BASEMAP_ATTRIBUTION}
+            maxZoom={BASEMAP_MAX_ZOOM}
           />
           <ZoomControl position="bottomright" />
           <FitBounds coords={allCoords} />

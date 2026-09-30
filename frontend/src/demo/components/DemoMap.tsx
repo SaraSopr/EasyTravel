@@ -10,6 +10,7 @@ import type {
   TransportMode,
 } from '../types'
 import { DAY_COLORS } from '../types'
+import { BASEMAP_URL } from '@/utils/basemap'
 
 interface MarkerState {
   id: string
@@ -543,7 +544,7 @@ const TRANSPORT_LABELS: Record<TransportMode, { icon: string; name: string }> = 
   taxi: { icon: '🚕', name: 'Taxi' },
 }
 
-const CARTO_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+const CARTO_URL = BASEMAP_URL
 const CARTO_ATTR = '&copy; <a href="https://carto.com/">CARTO</a>'
 
 export default function DemoMap({

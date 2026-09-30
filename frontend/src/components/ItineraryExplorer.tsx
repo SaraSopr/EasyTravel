@@ -8,6 +8,7 @@ import { Repeat, Trash2, X, Star, Check, Navigation, ImageOff } from 'lucide-rea
 import type { Itinerary, ItineraryStop, PoiSuggestion } from '@/types'
 import { getCategoryColor } from '@/utils/categoryColors'
 import { poiPhotoUrl } from '@/utils/photos'
+import { BASEMAP_URL, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM } from '@/utils/basemap'
 import {
   markVisited,
   unmarkVisited,
@@ -364,9 +365,9 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
           attributionControl={true}
         >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>'
-            maxZoom={20}
+            url={BASEMAP_URL}
+            attribution={BASEMAP_ATTRIBUTION}
+            maxZoom={BASEMAP_MAX_ZOOM}
           />
           <ZoomControl position="bottomright" />
           <MapBridge onReady={onMapReady} />
@@ -515,8 +516,8 @@ export default function ItineraryExplorer({ itinerary, onChange }: ItineraryExpl
                   attributionControl={false}
                 >
                   <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    maxZoom={20}
+                    url={BASEMAP_URL}
+                    maxZoom={BASEMAP_MAX_ZOOM}
                   />
                   <ZoomControl position="bottomright" />
                   {stops.length > 1 && (
