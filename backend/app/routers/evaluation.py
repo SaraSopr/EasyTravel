@@ -286,18 +286,27 @@ async def post_likert(body: LikertIn, db: AsyncSession = Depends(get_db)):
 # Export (for analysis)
 # ─────────────────────────────────────────────
 
+def _anonymize(evaluator_id: str, mapping: dict[str, int]) -> int:
+    if evaluator_id not in mapping:
+        mapping[evaluator_id] = len(mapping) + 1
+    return mapping[evaluator_id]
+
+
 @router.get("/export")
 async def export(db: AsyncSession = Depends(get_db)):
     """Single CSV joining ratings to their pair + itinerary (solver, type, profile).
 
     `system_agreement` = 1 when the human chose slot 'a' (the included POI = the
-    system's pick), 0 when 'b', blank for 'equal'.
+    system's pick), 0 when 'b', blank for 'equal'. `evaluator_id` is anonymized
+    to a sequential number, assigned in the order evaluators first appear in
+    this query.
     """
     res = await db.execute(
         select(EvaluationRating, EvaluationPair, EvaluationItinerary)
         .join(EvaluationPair, EvaluationRating.pair_id == EvaluationPair.id)
         .join(EvaluationItinerary, EvaluationPair.itinerary_id == EvaluationItinerary.id)
     )
+    mapping: dict[str, int] = {}
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
@@ -307,12 +316,43 @@ async def export(db: AsyncSession = Depends(get_db)):
     for rating, pair, itin in res.all():
         agreement = "" if rating.choice == "equal" else ("1" if rating.choice == "a" else "0")
         w.writerow([
-            rating.evaluator_id, pair.pair_type, itin.profile_key, itin.city,
-            itin.num_days, itin.solver, rating.choice, agreement,
+            _anonymize(rating.evaluator_id, mapping), pair.pair_type, itin.profile_key,
+            itin.city, itin.num_days, itin.solver, rating.choice, agreement,
             pair.poi_a_snapshot.get("name"), pair.poi_b_snapshot.get("name"),
         ])
     buf.seek(0)
     return StreamingResponse(
         buf, media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=evaluation_ratings.csv"},
+    )
+
+
+@router.get("/export/likert")
+async def export_likert(db: AsyncSession = Depends(get_db)):
+    """CSV of whole-itinerary Likert ratings, joined to itinerary metadata.
+
+    `evaluator_id` is anonymized to a sequential number, assigned independently
+    of the `/export` endpoint's own numbering.
+    """
+    res = await db.execute(
+        select(EvaluationLikert, EvaluationItinerary)
+        .join(EvaluationItinerary, EvaluationLikert.itinerary_id == EvaluationItinerary.id)
+    )
+    mapping: dict[str, int] = {}
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "evaluator_id", "profile_key", "city", "num_days", "solver",
+        "realism", "completeness", "profile_fit", "overall",
+    ])
+    for likert, itin in res.all():
+        w.writerow([
+            _anonymize(likert.evaluator_id, mapping), itin.profile_key, itin.city,
+            itin.num_days, itin.solver, likert.realism, likert.completeness,
+            likert.profile_fit, likert.overall,
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=evaluation_likert.csv"},
     )
