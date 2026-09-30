@@ -1,5 +1,5 @@
 {
-  "traceVersion": 3,
+  "traceVersion": 4,
   "city": {
     "name": "Roma",
     "center": [
@@ -113,7 +113,7 @@
           1110
         ],
         [
-          570,
+          720,
           1110
         ]
       ],
@@ -231,12 +231,12 @@
           1200
         ],
         [
-          540,
-          1200
+          630,
+          1170
         ],
         [
-          540,
-          1200
+          630,
+          1170
         ]
       ],
       "prize": 0.4064
@@ -302,11 +302,11 @@
         ],
         [
           570,
-          1080
+          1140
         ],
         [
           570,
-          1080
+          1140
         ]
       ],
       "prize": 0.5425
@@ -436,8 +436,14 @@
       "landmark": false,
       "visit_min": 90,
       "opening": [
-        null,
-        null,
+        [
+          570,
+          780
+        ],
+        [
+          570,
+          780
+        ],
         null
       ],
       "prize": 0.4359
@@ -637,9 +643,15 @@
       "landmark": false,
       "visit_min": 120,
       "opening": [
+        [
+          660,
+          1260
+        ],
         null,
-        null,
-        null
+        [
+          660,
+          1260
+        ]
       ],
       "prize": 0.5084
     },
@@ -820,7 +832,10 @@
       "landmark": false,
       "visit_min": 90,
       "opening": [
-        null,
+        [
+          600,
+          1140
+        ],
         [
           600,
           1140
@@ -854,15 +869,15 @@
       "opening": [
         [
           600,
-          1200
+          1260
         ],
         [
-          600,
-          1200
+          540,
+          1260
         ],
         [
-          600,
-          1200
+          540,
+          1260
         ]
       ],
       "prize": 0.3314
@@ -1015,11 +1030,11 @@
         ],
         [
           540,
-          1230
+          1200
         ],
         [
           540,
-          1230
+          1200
         ]
       ],
       "prize": 0.6143
@@ -1052,10 +1067,7 @@
           540,
           1200
         ],
-        [
-          540,
-          1200
-        ]
+        null
       ],
       "prize": 0.573
     },
@@ -1081,7 +1093,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.3831
     },
@@ -1107,7 +1122,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.643
     },
@@ -1168,7 +1186,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.5892
     },
@@ -1235,10 +1256,7 @@
           600,
           1080
         ],
-        [
-          600,
-          1080
-        ]
+        null
       ],
       "prize": 0.3491
     },
@@ -1298,13 +1316,16 @@
       "visit_min": 90,
       "opening": [
         [
-          540,
-          1140
+          600,
+          1200
         ],
-        null,
         [
-          540,
-          1140
+          600,
+          1200
+        ],
+        [
+          600,
+          1200
         ]
       ],
       "prize": 0.4082
@@ -1439,11 +1460,11 @@
           1140
         ],
         [
-          540,
+          600,
           1140
         ],
         [
-          540,
+          600,
           1140
         ]
       ],
@@ -1508,13 +1529,10 @@
           600,
           900
         ],
+        null,
         [
-          600,
-          900
-        ],
-        [
-          600,
-          900
+          570,
+          780
         ]
       ],
       "prize": 0.3762
@@ -1611,7 +1629,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.348
     },
@@ -1710,11 +1731,11 @@
           1140
         ],
         [
-          720,
+          600,
           1140
         ],
         [
-          720,
+          600,
           1140
         ]
       ],
@@ -1777,7 +1798,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.348
     },
@@ -2020,7 +2044,7 @@
           1080
         ],
         [
-          540,
+          720,
           1080
         ]
       ],
@@ -2054,10 +2078,7 @@
           540,
           795
         ],
-        [
-          540,
-          795
-        ]
+        null
       ],
       "prize": 0.3823
     },
@@ -2090,7 +2111,7 @@
           1140
         ],
         [
-          540,
+          720,
           1140
         ]
       ],
@@ -2153,16 +2174,10 @@
       "opening": [
         [
           540,
-          1020
+          840
         ],
-        [
-          540,
-          1020
-        ],
-        [
-          540,
-          1020
-        ]
+        null,
+        null
       ],
       "prize": 0.3602
     },
@@ -2265,8 +2280,8 @@
           1200
         ],
         [
-          1080,
-          1200
+          540,
+          720
         ]
       ],
       "prize": 0.3609
@@ -2297,11 +2312,11 @@
         ],
         [
           540,
-          1170
+          1200
         ],
         [
           540,
-          1170
+          1200
         ]
       ],
       "prize": 0.4471
@@ -2326,7 +2341,10 @@
       "landmark": false,
       "visit_min": 90,
       "opening": [
-        null,
+        [
+          570,
+          1140
+        ],
         [
           570,
           1140
@@ -2395,7 +2413,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.4093
     },
@@ -2915,11 +2936,11 @@
         ],
         [
           540,
-          1140
+          1200
         ],
         [
           540,
-          1140
+          1200
         ]
       ],
       "prize": 0.4204
@@ -3051,7 +3072,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.7103
     },
@@ -3076,7 +3100,7 @@
       "visit_min": 20,
       "opening": [
         [
-          540,
+          690,
           1320
         ],
         [
@@ -3357,7 +3381,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.6166
     },
@@ -3922,8 +3949,8 @@
           720
         ],
         [
-          600,
-          720
+          540,
+          780
         ]
       ],
       "prize": 0.3565
@@ -3992,8 +4019,8 @@
           1020
         ],
         [
-          540,
-          1020
+          780,
+          1140
         ]
       ],
       "prize": 0.3695
@@ -4019,13 +4046,10 @@
       "visit_min": 30,
       "opening": [
         [
-          600,
-          960
+          540,
+          780
         ],
-        [
-          600,
-          960
-        ],
+        null,
         [
           600,
           960
@@ -4482,7 +4506,7 @@
           1080
         ],
         [
-          540,
+          990,
           1080
         ]
       ],
@@ -4619,11 +4643,11 @@
         ],
         [
           540,
-          735
+          1125
         ],
         [
-          930,
-          1110
+          540,
+          1125
         ]
       ],
       "prize": 0.3986
@@ -4726,10 +4750,7 @@
           540,
           1080
         ],
-        [
-          540,
-          1080
-        ]
+        null
       ],
       "prize": 0.3548
     },
@@ -4757,14 +4778,8 @@
           540,
           960
         ],
-        [
-          540,
-          960
-        ],
-        [
-          540,
-          960
-        ]
+        null,
+        null
       ],
       "prize": 0.3412
     },
@@ -4790,7 +4805,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.3419
     },
@@ -4816,12 +4834,9 @@
       "opening": [
         [
           600,
-          1035
+          915
         ],
-        [
-          600,
-          1035
-        ],
+        null,
         [
           600,
           1035
@@ -4912,7 +4927,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          540,
+          1320
+        ]
       ],
       "prize": 0.3687
     },
@@ -5110,10 +5128,7 @@
           540,
           1230
         ],
-        [
-          540,
-          1230
-        ]
+        null
       ],
       "prize": 0.3899
     },
@@ -5147,7 +5162,7 @@
         ],
         [
           540,
-          1260
+          960
         ]
       ],
       "prize": 0.4111
@@ -5206,10 +5221,7 @@
           750,
           1320
         ],
-        [
-          750,
-          1320
-        ]
+        null
       ],
       "prize": 0.3988
     },
@@ -5348,7 +5360,7 @@
         ],
         [
           540,
-          1140
+          1080
         ]
       ],
       "prize": 0.3364
@@ -5416,10 +5428,7 @@
           750,
           1320
         ],
-        [
-          750,
-          1320
-        ]
+        null
       ],
       "prize": 0.324
     },
@@ -5447,14 +5456,8 @@
           600,
           1260
         ],
-        [
-          600,
-          1260
-        ],
-        [
-          600,
-          1260
-        ]
+        null,
+        null
       ],
       "prize": 0.4344
     },
@@ -5509,13 +5512,10 @@
           1320
         ],
         [
-          750,
+          720,
           1320
         ],
-        [
-          750,
-          1320
-        ]
+        null
       ],
       "prize": 0.5526
     },
@@ -5635,7 +5635,10 @@
       "landmark": true,
       "visit_min": 60,
       "opening": [
-        null,
+        [
+          720,
+          930
+        ],
         [
           720,
           930
@@ -5841,7 +5844,7 @@
           1320
         ],
         [
-          780,
+          765,
           1320
         ]
       ],
@@ -5979,10 +5982,7 @@
           750,
           1320
         ],
-        [
-          750,
-          1320
-        ]
+        null
       ],
       "prize": 0.4475
     },
@@ -6072,13 +6072,10 @@
           1290
         ],
         [
-          570,
+          600,
           1290
         ],
-        [
-          570,
-          1290
-        ]
+        null
       ],
       "prize": 0.3606
     },
@@ -6137,7 +6134,7 @@
           1320
         ],
         [
-          600,
+          660,
           1320
         ]
       ],
@@ -6311,10 +6308,7 @@
           765,
           1320
         ],
-        [
-          765,
-          1320
-        ]
+        null
       ],
       "prize": 0.4096
     },
@@ -6340,7 +6334,10 @@
       "opening": [
         null,
         null,
-        null
+        [
+          750,
+          900
+        ]
       ],
       "prize": 0.3492
     },
@@ -6404,11 +6401,11 @@
           1320
         ],
         [
-          1140,
+          780,
           1320
         ],
         [
-          1140,
+          780,
           1320
         ]
       ],
@@ -6473,14 +6470,8 @@
           540,
           900
         ],
-        [
-          540,
-          900
-        ],
-        [
-          540,
-          900
-        ]
+        null,
+        null
       ],
       "prize": 0.3831
     },
@@ -6512,10 +6503,7 @@
           660,
           1140
         ],
-        [
-          660,
-          1140
-        ]
+        null
       ],
       "prize": 0.4347
     },
@@ -6547,10 +6535,7 @@
           570,
           1230
         ],
-        [
-          570,
-          1230
-        ]
+        null
       ],
       "prize": 0.3909
     },
@@ -6635,7 +6620,10 @@
       "landmark": false,
       "visit_min": 30,
       "opening": [
-        null,
+        [
+          540,
+          1200
+        ],
         [
           540,
           1200
@@ -6667,7 +6655,10 @@
       "landmark": false,
       "visit_min": 90,
       "opening": [
-        null,
+        [
+          750,
+          1320
+        ],
         [
           750,
           1320
@@ -6734,13 +6725,16 @@
       "landmark": false,
       "visit_min": 120,
       "opening": [
-        null,
         [
           1140,
           1320
         ],
         [
-          1140,
+          720,
+          1320
+        ],
+        [
+          720,
           1320
         ]
       ],
@@ -6809,10 +6803,7 @@
           750,
           1320
         ],
-        [
-          750,
-          1320
-        ]
+        null
       ],
       "prize": 0.399
     },
@@ -6914,10 +6905,7 @@
           540,
           1200
         ],
-        [
-          540,
-          1200
-        ]
+        null
       ],
       "prize": 0.4048
     },
@@ -6971,14 +6959,8 @@
           690,
           1200
         ],
-        [
-          690,
-          1200
-        ],
-        [
-          690,
-          1200
-        ]
+        null,
+        null
       ],
       "prize": 0.4123
     },
@@ -7115,10 +7097,7 @@
           540,
           1320
         ],
-        [
-          540,
-          1320
-        ]
+        null
       ],
       "prize": 0.4408
     },
@@ -7152,7 +7131,7 @@
         ],
         [
           750,
-          900
+          930
         ]
       ],
       "prize": 0.4501
@@ -7182,7 +7161,7 @@
           1320
         ],
         [
-          1110,
+          750,
           1320
         ],
         [
@@ -7220,10 +7199,7 @@
           540,
           1170
         ],
-        [
-          540,
-          1170
-        ]
+        null
       ],
       "prize": 0.3872
     },
@@ -7351,10 +7327,7 @@
           780,
           1320
         ],
-        [
-          780,
-          1320
-        ]
+        null
       ],
       "prize": 0.2897
     },
@@ -7473,10 +7446,7 @@
           750,
           1320
         ],
-        [
-          750,
-          1320
-        ]
+        null
       ],
       "prize": 0.4127
     },
@@ -7504,14 +7474,8 @@
           630,
           900
         ],
-        [
-          630,
-          900
-        ],
-        [
-          630,
-          900
-        ]
+        null,
+        null
       ],
       "prize": 0.4382
     },
@@ -7543,10 +7507,7 @@
           540,
           1230
         ],
-        [
-          540,
-          1230
-        ]
+        null
       ],
       "prize": 0.3435
     },
@@ -7631,14 +7592,8 @@
       "landmark": false,
       "visit_min": 20,
       "opening": [
-        [
-          540,
-          1320
-        ],
-        [
-          540,
-          1320
-        ],
+        null,
+        null,
         [
           540,
           1320
@@ -7674,10 +7629,7 @@
           540,
           1260
         ],
-        [
-          540,
-          1260
-        ]
+        null
       ],
       "prize": 0.4238
     }
@@ -8141,13 +8093,13 @@
       "fc8e720d-0486-4727-a4e0-5370efc3917c",
       "bcfbf427-f055-4fdb-bf42-77c43be40c0e",
       "27b71e64-bd29-4897-bfc5-70fccc78c231",
+      "7d5e9d85-4a49-43e3-a66a-c6c956b7585f",
       "4a996aa8-a3f9-46ef-83e9-3ad178f12ef9",
       "1d30704f-f55d-423d-b53c-723b6fc54468",
       "d8778f15-678b-4fd7-ba4f-a939834f07f6",
       "180a934e-f8db-4c12-adf6-dccfd6203bc1",
       "ed03bfa9-d4b5-49d5-8706-794ed37cb7f8",
       "fafaaf46-f157-456f-b6ae-db2eb4d15ae9",
-      "91541175-cdbd-4c5b-890c-cdeb074e73cd",
       "a1ae0d72-4190-41fe-ac3a-80987da1e6c5",
       "ad5c0e45-c8de-482d-8fca-7eb6322bff39",
       "1188d687-e287-4da3-ae5f-30ec93e6b526",
@@ -8175,7 +8127,6 @@
       "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
       "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
       "2a7f280d-e6f1-4345-9148-12d29c64a039",
-      "91541175-cdbd-4c5b-890c-cdeb074e73cd",
       "95215ac3-b4df-4e15-a403-492e83fb55f2",
       "1188d687-e287-4da3-ae5f-30ec93e6b526",
       "cc151809-8947-470f-b058-69c683152953",
@@ -8198,179 +8149,195 @@
       {
         "stops": [
           {
-            "poiId": "7d5e9d85-4a49-43e3-a66a-c6c956b7585f",
+            "poiId": "c4725333-af5e-44bf-a608-243f270cf75b",
             "arrivalMin": 540,
-            "departMin": 560,
+            "departMin": 585,
             "kind": "visit",
             "transportFromPrevious": null,
             "travelMinutesFromPrevious": null
           },
           {
-            "poiId": "ea5c439d-f424-4f55-a174-3fb1e702e8b9",
-            "arrivalMin": 563,
-            "departMin": 683,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 3.0
-          },
-          {
-            "poiId": "e9a48103-16e6-486a-a18a-369fd35c1c68",
-            "arrivalMin": 687,
-            "departMin": 807,
+            "poiId": "9217729c-3461-4b67-842a-4f136ef3dab4",
+            "arrivalMin": 593,
+            "departMin": 623,
             "kind": "visit",
             "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 4.0
-          },
-          {
-            "poiId": "68e3b046-bee7-4ea7-9c3c-518b8d88c704",
-            "arrivalMin": 809,
-            "departMin": 899,
-            "kind": "meal",
-            "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 2.6
+            "travelMinutesFromPrevious": 8.3
           },
           {
             "poiId": "84e6979d-040b-4645-ace6-cd218dd532a7",
-            "arrivalMin": 906,
-            "departMin": 936,
+            "arrivalMin": 627,
+            "departMin": 657,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 4.2
+          },
+          {
+            "poiId": "90a45100-fb6d-44a6-bd5d-4b4638917cc5",
+            "arrivalMin": 660,
+            "departMin": 705,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 3.0
+          },
+          {
+            "poiId": "d1e3c4ee-a14e-437b-8ed2-21e8afdda10c",
+            "arrivalMin": 712,
+            "departMin": 742,
             "kind": "visit",
             "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 7.1
           },
           {
-            "poiId": "90a45100-fb6d-44a6-bd5d-4b4638917cc5",
-            "arrivalMin": 939,
-            "departMin": 984,
+            "poiId": "e9a48103-16e6-486a-a18a-369fd35c1c68",
+            "arrivalMin": 744,
+            "departMin": 864,
             "kind": "visit",
             "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 3.0
+            "travelMinutesFromPrevious": 2.3
           },
           {
-            "poiId": "c4725333-af5e-44bf-a608-243f270cf75b",
-            "arrivalMin": 989,
-            "departMin": 1034,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 5.1
-          },
-          {
-            "poiId": "d933d061-4e8f-400b-9991-95b1f513d50c",
-            "arrivalMin": 1140,
-            "departMin": 1185,
+            "poiId": "68e3b046-bee7-4ea7-9c3c-518b8d88c704",
+            "arrivalMin": 867,
+            "departMin": 957,
             "kind": "meal",
             "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 8.6
+            "travelMinutesFromPrevious": 2.6
           },
           {
             "poiId": "9986463f-f15d-4424-9b97-4864a28ebef3",
-            "arrivalMin": 1188,
-            "departMin": 1278,
+            "arrivalMin": 964,
+            "departMin": 1054,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 3.2
+            "travelMinutesFromPrevious": 7.4
+          },
+          {
+            "poiId": "9a5f93fc-10bd-4e7f-8fcb-6f33aa8e31fe",
+            "arrivalMin": 1057,
+            "departMin": 1117,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 2.7
           },
           {
             "poiId": "494b1eae-a97f-4dc4-9d1a-1f15b137e76c",
-            "arrivalMin": 1282,
-            "departMin": 1312,
+            "arrivalMin": 1124,
+            "departMin": 1154,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.6
+            "travelMinutesFromPrevious": 7.1
+          },
+          {
+            "poiId": "dbc60774-a57d-4212-be70-16da9c3d2c99",
+            "arrivalMin": 1158,
+            "departMin": 1218,
+            "kind": "meal",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 4.3
           }
         ],
         "route": [
-          "7d5e9d85-4a49-43e3-a66a-c6c956b7585f",
-          "ea5c439d-f424-4f55-a174-3fb1e702e8b9",
-          "e9a48103-16e6-486a-a18a-369fd35c1c68",
-          "68e3b046-bee7-4ea7-9c3c-518b8d88c704",
+          "c4725333-af5e-44bf-a608-243f270cf75b",
+          "9217729c-3461-4b67-842a-4f136ef3dab4",
           "84e6979d-040b-4645-ace6-cd218dd532a7",
           "90a45100-fb6d-44a6-bd5d-4b4638917cc5",
-          "c4725333-af5e-44bf-a608-243f270cf75b",
-          "d933d061-4e8f-400b-9991-95b1f513d50c",
+          "d1e3c4ee-a14e-437b-8ed2-21e8afdda10c",
+          "e9a48103-16e6-486a-a18a-369fd35c1c68",
+          "68e3b046-bee7-4ea7-9c3c-518b8d88c704",
           "9986463f-f15d-4424-9b97-4864a28ebef3",
-          "494b1eae-a97f-4dc4-9d1a-1f15b137e76c"
+          "9a5f93fc-10bd-4e7f-8fcb-6f33aa8e31fe",
+          "494b1eae-a97f-4dc4-9d1a-1f15b137e76c",
+          "dbc60774-a57d-4212-be70-16da9c3d2c99"
         ],
-        "idleMin": 105,
+        "idleMin": 102,
         "replayReal": {
           "stops": [
             {
-              "poiId": "7d5e9d85-4a49-43e3-a66a-c6c956b7585f",
+              "poiId": "c4725333-af5e-44bf-a608-243f270cf75b",
               "arrivalMin": 540,
-              "departMin": 560,
+              "departMin": 585,
               "transportFromPrevious": null,
               "travelMinutesFromPrevious": null
             },
             {
-              "poiId": "ea5c439d-f424-4f55-a174-3fb1e702e8b9",
-              "arrivalMin": 571,
-              "departMin": 691,
-              "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 10.8
-            },
-            {
-              "poiId": "e9a48103-16e6-486a-a18a-369fd35c1c68",
-              "arrivalMin": 703,
-              "departMin": 823,
+              "poiId": "9217729c-3461-4b67-842a-4f136ef3dab4",
+              "arrivalMin": 596,
+              "departMin": 626,
               "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 12.0
-            },
-            {
-              "poiId": "68e3b046-bee7-4ea7-9c3c-518b8d88c704",
-              "arrivalMin": 825,
-              "departMin": 915,
-              "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 2.6
+              "travelMinutesFromPrevious": 10.6
             },
             {
               "poiId": "84e6979d-040b-4645-ace6-cd218dd532a7",
-              "arrivalMin": 922,
-              "departMin": 952,
-              "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 7.1
+              "arrivalMin": 635,
+              "departMin": 665,
+              "transportFromPrevious": "transit",
+              "travelMinutesFromPrevious": 9.5
             },
             {
               "poiId": "90a45100-fb6d-44a6-bd5d-4b4638917cc5",
-              "arrivalMin": 956,
-              "departMin": 1001,
+              "arrivalMin": 669,
+              "departMin": 714,
               "transportFromPrevious": "walking",
               "travelMinutesFromPrevious": 3.5
             },
             {
-              "poiId": "c4725333-af5e-44bf-a608-243f270cf75b",
-              "arrivalMin": 1011,
-              "departMin": 1056,
-              "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 10.4
+              "poiId": "d1e3c4ee-a14e-437b-8ed2-21e8afdda10c",
+              "arrivalMin": 724,
+              "departMin": 754,
+              "transportFromPrevious": "walking",
+              "travelMinutesFromPrevious": 10.5
             },
             {
-              "poiId": "d933d061-4e8f-400b-9991-95b1f513d50c",
-              "arrivalMin": 1065,
-              "departMin": 1110,
+              "poiId": "e9a48103-16e6-486a-a18a-369fd35c1c68",
+              "arrivalMin": 762,
+              "departMin": 882,
               "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 8.6
+              "travelMinutesFromPrevious": 8.1
+            },
+            {
+              "poiId": "68e3b046-bee7-4ea7-9c3c-518b8d88c704",
+              "arrivalMin": 885,
+              "departMin": 975,
+              "transportFromPrevious": "walking",
+              "travelMinutesFromPrevious": 2.6
             },
             {
               "poiId": "9986463f-f15d-4424-9b97-4864a28ebef3",
-              "arrivalMin": 1112,
-              "departMin": 1202,
+              "arrivalMin": 980,
+              "departMin": 1070,
               "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 2.1
+              "travelMinutesFromPrevious": 4.9
+            },
+            {
+              "poiId": "9a5f93fc-10bd-4e7f-8fcb-6f33aa8e31fe",
+              "arrivalMin": 1074,
+              "departMin": 1134,
+              "transportFromPrevious": "transit",
+              "travelMinutesFromPrevious": 4.5
             },
             {
               "poiId": "494b1eae-a97f-4dc4-9d1a-1f15b137e76c",
-              "arrivalMin": 1207,
-              "departMin": 1237,
+              "arrivalMin": 1141,
+              "departMin": 1171,
               "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 4.7
+              "travelMinutesFromPrevious": 7.1
+            },
+            {
+              "poiId": "dbc60774-a57d-4212-be70-16da9c3d2c99",
+              "arrivalMin": 1174,
+              "departMin": 1234,
+              "transportFromPrevious": "transit",
+              "travelMinutesFromPrevious": 2.9
             }
           ],
           "overrunMin": 0,
           "closedOnArrival": [],
-          "totalLegs": 9,
-          "realLegs": 5,
-          "fallbackLegs": 4,
+          "totalLegs": 10,
+          "realLegs": 7,
+          "fallbackLegs": 3,
           "cachedFallbackLegs": 0,
-          "uncachedFallbackLegs": 4
+          "uncachedFallbackLegs": 3
         }
       },
       {
@@ -8384,100 +8351,100 @@
             "travelMinutesFromPrevious": null
           },
           {
-            "poiId": "bcfbf427-f055-4fdb-bf42-77c43be40c0e",
-            "arrivalMin": 578,
-            "departMin": 698,
+            "poiId": "ed03bfa9-d4b5-49d5-8706-794ed37cb7f8",
+            "arrivalMin": 575,
+            "departMin": 605,
             "kind": "visit",
             "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 8.5
+            "travelMinutesFromPrevious": 5.4
+          },
+          {
+            "poiId": "bcfbf427-f055-4fdb-bf42-77c43be40c0e",
+            "arrivalMin": 609,
+            "departMin": 729,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 4.1
           },
           {
             "poiId": "d8778f15-678b-4fd7-ba4f-a939834f07f6",
-            "arrivalMin": 708,
-            "departMin": 753,
+            "arrivalMin": 739,
+            "departMin": 784,
             "kind": "visit",
             "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 9.9
           },
           {
             "poiId": "068c5b89-6629-4347-9f10-fa14ef8774ff",
-            "arrivalMin": 757,
-            "departMin": 847,
+            "arrivalMin": 788,
+            "departMin": 878,
             "kind": "meal",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 3.7
           },
           {
             "poiId": "27b71e64-bd29-4897-bfc5-70fccc78c231",
-            "arrivalMin": 850,
-            "departMin": 970,
+            "arrivalMin": 881,
+            "departMin": 1001,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 3.3
           },
           {
             "poiId": "4a996aa8-a3f9-46ef-83e9-3ad178f12ef9",
-            "arrivalMin": 975,
-            "departMin": 1020,
+            "arrivalMin": 1006,
+            "departMin": 1051,
             "kind": "visit",
             "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 4.9
+          },
+          {
+            "poiId": "7d5e9d85-4a49-43e3-a66a-c6c956b7585f",
+            "arrivalMin": 1054,
+            "departMin": 1074,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 3.4
           },
           {
             "poiId": "1d30704f-f55d-423d-b53c-723b6fc54468",
-            "arrivalMin": 1027,
-            "departMin": 1057,
+            "arrivalMin": 1079,
+            "departMin": 1109,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 7.3
+            "travelMinutesFromPrevious": 4.3
           },
           {
-            "poiId": "fc8e720d-0486-4727-a4e0-5370efc3917c",
-            "arrivalMin": 1066,
-            "departMin": 1126,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 8.5
-          },
-          {
-            "poiId": "9fa8b2ef-22f7-4e01-b447-31dcddc71a79",
+            "poiId": "7a986c38-de0a-4351-a916-617eb4f396dc",
             "arrivalMin": 1140,
-            "departMin": 1230,
+            "departMin": 1200,
             "kind": "meal",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 6.6
-          },
-          {
-            "poiId": "180a934e-f8db-4c12-adf6-dccfd6203bc1",
-            "arrivalMin": 1234,
-            "departMin": 1279,
-            "kind": "visit",
             "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 4.9
+            "travelMinutesFromPrevious": 7.1
           },
           {
-            "poiId": "ed03bfa9-d4b5-49d5-8706-794ed37cb7f8",
-            "arrivalMin": 1285,
-            "departMin": 1315,
+            "poiId": "6d1806b2-2824-4ec2-944b-f16f4612862e",
+            "arrivalMin": 1213,
+            "departMin": 1273,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 5.3
+            "travelMinutesFromPrevious": 13.4
           }
         ],
         "route": [
           "249b5057-6335-4096-9968-0c398342f894",
+          "ed03bfa9-d4b5-49d5-8706-794ed37cb7f8",
           "bcfbf427-f055-4fdb-bf42-77c43be40c0e",
           "d8778f15-678b-4fd7-ba4f-a939834f07f6",
           "068c5b89-6629-4347-9f10-fa14ef8774ff",
           "27b71e64-bd29-4897-bfc5-70fccc78c231",
           "4a996aa8-a3f9-46ef-83e9-3ad178f12ef9",
+          "7d5e9d85-4a49-43e3-a66a-c6c956b7585f",
           "1d30704f-f55d-423d-b53c-723b6fc54468",
-          "fc8e720d-0486-4727-a4e0-5370efc3917c",
-          "9fa8b2ef-22f7-4e01-b447-31dcddc71a79",
-          "180a934e-f8db-4c12-adf6-dccfd6203bc1",
-          "ed03bfa9-d4b5-49d5-8706-794ed37cb7f8"
+          "7a986c38-de0a-4351-a916-617eb4f396dc",
+          "6d1806b2-2824-4ec2-944b-f16f4612862e"
         ],
-        "idleMin": 12,
+        "idleMin": 71,
         "replayReal": {
           "stops": [
             {
@@ -8488,77 +8455,77 @@
               "travelMinutesFromPrevious": null
             },
             {
-              "poiId": "bcfbf427-f055-4fdb-bf42-77c43be40c0e",
-              "arrivalMin": 588,
-              "departMin": 708,
+              "poiId": "ed03bfa9-d4b5-49d5-8706-794ed37cb7f8",
+              "arrivalMin": 577,
+              "departMin": 607,
               "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 18.4
+              "travelMinutesFromPrevious": 7.2
+            },
+            {
+              "poiId": "bcfbf427-f055-4fdb-bf42-77c43be40c0e",
+              "arrivalMin": 619,
+              "departMin": 739,
+              "transportFromPrevious": "walking",
+              "travelMinutesFromPrevious": 12.2
             },
             {
               "poiId": "d8778f15-678b-4fd7-ba4f-a939834f07f6",
-              "arrivalMin": 723,
-              "departMin": 768,
+              "arrivalMin": 754,
+              "departMin": 799,
               "transportFromPrevious": "walking",
               "travelMinutesFromPrevious": 14.3
             },
             {
               "poiId": "068c5b89-6629-4347-9f10-fa14ef8774ff",
-              "arrivalMin": 770,
-              "departMin": 860,
+              "arrivalMin": 801,
+              "departMin": 891,
               "transportFromPrevious": "transit",
               "travelMinutesFromPrevious": 2.5
             },
             {
               "poiId": "27b71e64-bd29-4897-bfc5-70fccc78c231",
-              "arrivalMin": 862,
-              "departMin": 982,
+              "arrivalMin": 893,
+              "departMin": 1013,
               "transportFromPrevious": "transit",
               "travelMinutesFromPrevious": 2.2
             },
             {
               "poiId": "4a996aa8-a3f9-46ef-83e9-3ad178f12ef9",
-              "arrivalMin": 992,
-              "departMin": 1037,
+              "arrivalMin": 1023,
+              "departMin": 1068,
               "transportFromPrevious": "walking",
               "travelMinutesFromPrevious": 9.7
             },
             {
+              "poiId": "7d5e9d85-4a49-43e3-a66a-c6c956b7585f",
+              "arrivalMin": 1079,
+              "departMin": 1099,
+              "transportFromPrevious": "transit",
+              "travelMinutesFromPrevious": 10.4
+            },
+            {
               "poiId": "1d30704f-f55d-423d-b53c-723b6fc54468",
-              "arrivalMin": 1053,
-              "departMin": 1083,
+              "arrivalMin": 1110,
+              "departMin": 1140,
               "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 15.5
+              "travelMinutesFromPrevious": 11.0
             },
             {
-              "poiId": "fc8e720d-0486-4727-a4e0-5370efc3917c",
-              "arrivalMin": 1091,
-              "departMin": 1151,
-              "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 8.3
-            },
-            {
-              "poiId": "9fa8b2ef-22f7-4e01-b447-31dcddc71a79",
-              "arrivalMin": 1155,
-              "departMin": 1245,
-              "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 4.4
-            },
-            {
-              "poiId": "180a934e-f8db-4c12-adf6-dccfd6203bc1",
-              "arrivalMin": 1250,
-              "departMin": 1295,
+              "poiId": "7a986c38-de0a-4351-a916-617eb4f396dc",
+              "arrivalMin": 1147,
+              "departMin": 1207,
               "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 4.9
+              "travelMinutesFromPrevious": 7.1
             },
             {
-              "poiId": "ed03bfa9-d4b5-49d5-8706-794ed37cb7f8",
-              "arrivalMin": 1301,
-              "departMin": 1331,
+              "poiId": "6d1806b2-2824-4ec2-944b-f16f4612862e",
+              "arrivalMin": 1216,
+              "departMin": 1276,
               "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 6.0
+              "travelMinutesFromPrevious": 8.9
             }
           ],
-          "overrunMin": 11.1,
+          "overrunMin": 0,
           "closedOnArrival": [],
           "totalLegs": 10,
           "realLegs": 6,
@@ -8570,7 +8537,7 @@
       {
         "stops": [
           {
-            "poiId": "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
+            "poiId": "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
             "arrivalMin": 540,
             "departMin": 585,
             "kind": "visit",
@@ -8578,200 +8545,232 @@
             "travelMinutesFromPrevious": null
           },
           {
+            "poiId": "3927a629-4f0f-4873-af5f-493fc9caafed",
+            "arrivalMin": 592,
+            "departMin": 637,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 7.0
+          },
+          {
+            "poiId": "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
+            "arrivalMin": 640,
+            "departMin": 685,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 3.5
+          },
+          {
             "poiId": "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
-            "arrivalMin": 591,
-            "departMin": 636,
+            "arrivalMin": 692,
+            "departMin": 737,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 6.6
           },
           {
             "poiId": "7e8939d2-813f-47cb-8e93-dbd2923418ee",
-            "arrivalMin": 640,
-            "departMin": 700,
+            "arrivalMin": 740,
+            "departMin": 800,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 3.5
           },
           {
-            "poiId": "535a2ca5-0fde-4354-8a1b-4d8a6cc05e90",
-            "arrivalMin": 704,
-            "departMin": 824,
-            "kind": "visit",
+            "poiId": "0425b48e-8a2f-4447-b9e5-c4f22edde947",
+            "arrivalMin": 808,
+            "departMin": 868,
+            "kind": "meal",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.3
+            "travelMinutesFromPrevious": 7.9
           },
           {
-            "poiId": "0425b48e-8a2f-4447-b9e5-c4f22edde947",
-            "arrivalMin": 828,
-            "departMin": 888,
-            "kind": "meal",
+            "poiId": "535a2ca5-0fde-4354-8a1b-4d8a6cc05e90",
+            "arrivalMin": 872,
+            "departMin": 992,
+            "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 4.2
           },
           {
+            "poiId": "47c0da94-335a-42d7-aec0-890af3449f52",
+            "arrivalMin": 996,
+            "departMin": 1056,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 4.1
+          },
+          {
             "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
-            "arrivalMin": 897,
-            "departMin": 927,
+            "arrivalMin": 1062,
+            "departMin": 1092,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 9.0
-          },
-          {
-            "poiId": "1188d687-e287-4da3-ae5f-30ec93e6b526",
-            "arrivalMin": 930,
-            "departMin": 990,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 3.1
-          },
-          {
-            "poiId": "91541175-cdbd-4c5b-890c-cdeb074e73cd",
-            "arrivalMin": 998,
-            "departMin": 1058,
-            "kind": "visit",
-            "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 7.9
+            "travelMinutesFromPrevious": 5.3
           },
           {
             "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
-            "arrivalMin": 1063,
-            "departMin": 1093,
+            "arrivalMin": 1097,
+            "departMin": 1127,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.7
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 5.1
+          },
+          {
+            "poiId": "5a544a5b-472a-4a67-b113-feb1d78d25a1",
+            "arrivalMin": 1136,
+            "departMin": 1156,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 9.7
           },
           {
             "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
-            "arrivalMin": 1101,
-            "departMin": 1121,
+            "arrivalMin": 1161,
+            "departMin": 1181,
             "kind": "visit",
             "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 7.7
+            "travelMinutesFromPrevious": 4.6
           },
           {
             "poiId": "4de32de8-09e3-46af-ab41-b943fa457b4f",
-            "arrivalMin": 1127,
-            "departMin": 1172,
+            "arrivalMin": 1188,
+            "departMin": 1233,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 6.8
           },
           {
-            "poiId": "7344a3cf-4f46-48ad-bc34-034be49048f4",
-            "arrivalMin": 1179,
-            "departMin": 1239,
+            "poiId": "97bf9ef9-19f5-45c2-9e2d-af319a2b0fc9",
+            "arrivalMin": 1245,
+            "departMin": 1305,
             "kind": "meal",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 6.9
+            "travelMinutesFromPrevious": 12.3
           }
         ],
         "route": [
+          "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
+          "3927a629-4f0f-4873-af5f-493fc9caafed",
           "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
           "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
           "7e8939d2-813f-47cb-8e93-dbd2923418ee",
-          "535a2ca5-0fde-4354-8a1b-4d8a6cc05e90",
           "0425b48e-8a2f-4447-b9e5-c4f22edde947",
+          "535a2ca5-0fde-4354-8a1b-4d8a6cc05e90",
+          "47c0da94-335a-42d7-aec0-890af3449f52",
           "212771e2-2daa-4d30-800d-a91a19f50f43",
-          "1188d687-e287-4da3-ae5f-30ec93e6b526",
-          "91541175-cdbd-4c5b-890c-cdeb074e73cd",
           "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
+          "5a544a5b-472a-4a67-b113-feb1d78d25a1",
           "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
           "4de32de8-09e3-46af-ab41-b943fa457b4f",
-          "7344a3cf-4f46-48ad-bc34-034be49048f4"
+          "97bf9ef9-19f5-45c2-9e2d-af319a2b0fc9"
         ],
-        "idleMin": 81,
+        "idleMin": 15,
         "replayReal": {
           "stops": [
             {
-              "poiId": "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
+              "poiId": "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
               "arrivalMin": 540,
               "departMin": 585,
               "transportFromPrevious": null,
               "travelMinutesFromPrevious": null
             },
             {
+              "poiId": "3927a629-4f0f-4873-af5f-493fc9caafed",
+              "arrivalMin": 595,
+              "departMin": 640,
+              "transportFromPrevious": "walking",
+              "travelMinutesFromPrevious": 9.6
+            },
+            {
+              "poiId": "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
+              "arrivalMin": 649,
+              "departMin": 694,
+              "transportFromPrevious": "walking",
+              "travelMinutesFromPrevious": 9.7
+            },
+            {
               "poiId": "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
-              "arrivalMin": 594,
-              "departMin": 639,
+              "arrivalMin": 703,
+              "departMin": 748,
               "transportFromPrevious": "transit",
               "travelMinutesFromPrevious": 8.7
             },
             {
               "poiId": "7e8939d2-813f-47cb-8e93-dbd2923418ee",
-              "arrivalMin": 645,
-              "departMin": 705,
+              "arrivalMin": 754,
+              "departMin": 814,
               "transportFromPrevious": "transit",
               "travelMinutesFromPrevious": 6.3
             },
             {
-              "poiId": "535a2ca5-0fde-4354-8a1b-4d8a6cc05e90",
-              "arrivalMin": 714,
-              "departMin": 834,
+              "poiId": "0425b48e-8a2f-4447-b9e5-c4f22edde947",
+              "arrivalMin": 819,
+              "departMin": 879,
               "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 8.9
+              "travelMinutesFromPrevious": 5.3
             },
             {
-              "poiId": "0425b48e-8a2f-4447-b9e5-c4f22edde947",
-              "arrivalMin": 837,
-              "departMin": 897,
+              "poiId": "535a2ca5-0fde-4354-8a1b-4d8a6cc05e90",
+              "arrivalMin": 882,
+              "departMin": 1002,
               "transportFromPrevious": "transit",
               "travelMinutesFromPrevious": 2.8
             },
             {
+              "poiId": "47c0da94-335a-42d7-aec0-890af3449f52",
+              "arrivalMin": 1008,
+              "departMin": 1068,
+              "transportFromPrevious": "transit",
+              "travelMinutesFromPrevious": 5.5
+            },
+            {
               "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
-              "arrivalMin": 903,
-              "departMin": 933,
+              "arrivalMin": 1075,
+              "departMin": 1105,
               "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 6.0
-            },
-            {
-              "poiId": "1188d687-e287-4da3-ae5f-30ec93e6b526",
-              "arrivalMin": 939,
-              "departMin": 999,
-              "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 6.5
-            },
-            {
-              "poiId": "91541175-cdbd-4c5b-890c-cdeb074e73cd",
-              "arrivalMin": 1009,
-              "departMin": 1069,
-              "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 9.7
+              "travelMinutesFromPrevious": 6.9
             },
             {
               "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
-              "arrivalMin": 1073,
-              "departMin": 1103,
-              "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 3.8
+              "arrivalMin": 1110,
+              "departMin": 1140,
+              "transportFromPrevious": "walking",
+              "travelMinutesFromPrevious": 5.6
+            },
+            {
+              "poiId": "5a544a5b-472a-4a67-b113-feb1d78d25a1",
+              "arrivalMin": 1155,
+              "departMin": 1175,
+              "transportFromPrevious": "walking",
+              "travelMinutesFromPrevious": 14.2
             },
             {
               "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
-              "arrivalMin": 1113,
-              "departMin": 1133,
+              "arrivalMin": 1181,
+              "departMin": 1201,
               "transportFromPrevious": "walking",
-              "travelMinutesFromPrevious": 10.6
+              "travelMinutesFromPrevious": 6.3
             },
             {
               "poiId": "4de32de8-09e3-46af-ab41-b943fa457b4f",
-              "arrivalMin": 1141,
-              "departMin": 1186,
+              "arrivalMin": 1209,
+              "departMin": 1254,
               "transportFromPrevious": "transit",
               "travelMinutesFromPrevious": 7.9
             },
             {
-              "poiId": "7344a3cf-4f46-48ad-bc34-034be49048f4",
-              "arrivalMin": 1191,
-              "departMin": 1251,
+              "poiId": "97bf9ef9-19f5-45c2-9e2d-af319a2b0fc9",
+              "arrivalMin": 1262,
+              "departMin": 1322,
               "transportFromPrevious": "transit",
-              "travelMinutesFromPrevious": 4.6
+              "travelMinutesFromPrevious": 8.2
             }
           ],
-          "overrunMin": 0,
+          "overrunMin": 2.0,
           "closedOnArrival": [],
-          "totalLegs": 11,
-          "realLegs": 8,
+          "totalLegs": 13,
+          "realLegs": 10,
           "fallbackLegs": 3,
           "cachedFallbackLegs": 0,
           "uncachedFallbackLegs": 3
@@ -9440,48 +9439,50 @@
             "travelMinutesFromPrevious": 6.2
           },
           {
-            "poiId": "dbc60774-a57d-4212-be70-16da9c3d2c99",
-            "arrivalMin": 1153,
-            "departMin": 1213,
+            "poiId": "d933d061-4e8f-400b-9991-95b1f513d50c",
+            "arrivalMin": 1154,
+            "departMin": 1199,
             "kind": "meal",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 2.6
+            "travelMinutesFromPrevious": 3.2
           }
         ],
-        "idleMin": 137,
+        "idleMin": 151,
         "travelSavedPct": 9.0
       },
       {
         "sourceDayIdx": 2,
         "preReorderRoute": [
+          "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
+          "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
+          "3927a629-4f0f-4873-af5f-493fc9caafed",
           "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
-          "4de32de8-09e3-46af-ab41-b943fa457b4f",
           "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
           "7e8939d2-813f-47cb-8e93-dbd2923418ee",
           "3b52bc7c-0d87-4158-b020-90d19752424c",
-          "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
           "95215ac3-b4df-4e15-a403-492e83fb55f2",
-          "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
+          "5a544a5b-472a-4a67-b113-feb1d78d25a1",
           "212771e2-2daa-4d30-800d-a91a19f50f43",
           "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
-          "f47ef883-060e-4beb-974e-f8f0656dca1d"
+          "de7b1b0f-abdc-4cfa-ab80-81e89f9625af"
         ],
         "route": [
+          "212771e2-2daa-4d30-800d-a91a19f50f43",
+          "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
           "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
           "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
           "7e8939d2-813f-47cb-8e93-dbd2923418ee",
           "3b52bc7c-0d87-4158-b020-90d19752424c",
-          "4de32de8-09e3-46af-ab41-b943fa457b4f",
+          "3927a629-4f0f-4873-af5f-493fc9caafed",
           "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
           "95215ac3-b4df-4e15-a403-492e83fb55f2",
-          "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
-          "212771e2-2daa-4d30-800d-a91a19f50f43",
-          "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
-          "f47ef883-060e-4beb-974e-f8f0656dca1d"
+          "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
+          "5a544a5b-472a-4a67-b113-feb1d78d25a1",
+          "17e54c54-9a3f-4c17-ba13-7f1433a2732b"
         ],
         "reorderStops": [
           {
-            "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
+            "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
             "arrivalMin": 540,
             "departMin": 570,
             "kind": "visit",
@@ -9489,89 +9490,97 @@
             "travelMinutesFromPrevious": null
           },
           {
+            "poiId": "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
+            "arrivalMin": 574,
+            "departMin": 619,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 4.4
+          },
+          {
+            "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
+            "arrivalMin": 624,
+            "departMin": 654,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 5.6
+          },
+          {
             "poiId": "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
-            "arrivalMin": 581,
-            "departMin": 626,
+            "arrivalMin": 666,
+            "departMin": 711,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 11.3
           },
           {
             "poiId": "7e8939d2-813f-47cb-8e93-dbd2923418ee",
-            "arrivalMin": 635,
-            "departMin": 695,
+            "arrivalMin": 720,
+            "departMin": 780,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 9.4
           },
           {
             "poiId": "3b52bc7c-0d87-4158-b020-90d19752424c",
-            "arrivalMin": 703,
-            "departMin": 733,
+            "arrivalMin": 788,
+            "departMin": 818,
             "kind": "visit",
             "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 7.4
           },
           {
-            "poiId": "4de32de8-09e3-46af-ab41-b943fa457b4f",
-            "arrivalMin": 742,
-            "departMin": 787,
+            "poiId": "3927a629-4f0f-4873-af5f-493fc9caafed",
+            "arrivalMin": 830,
+            "departMin": 875,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 9.0
+            "travelMinutesFromPrevious": 12.2
           },
           {
             "poiId": "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
-            "arrivalMin": 795,
-            "departMin": 840,
+            "arrivalMin": 884,
+            "departMin": 929,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 8.7
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 9.7
           },
           {
             "poiId": "95215ac3-b4df-4e15-a403-492e83fb55f2",
-            "arrivalMin": 901,
-            "departMin": 991,
+            "arrivalMin": 935,
+            "departMin": 1025,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 5.2
           },
           {
-            "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
-            "arrivalMin": 997,
-            "departMin": 1017,
+            "poiId": "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
+            "arrivalMin": 1030,
+            "departMin": 1075,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 6.2
-          },
-          {
-            "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
-            "arrivalMin": 1022,
-            "departMin": 1052,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
+            "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 5.5
           },
           {
-            "poiId": "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
-            "arrivalMin": 1057,
-            "departMin": 1102,
+            "poiId": "5a544a5b-472a-4a67-b113-feb1d78d25a1",
+            "arrivalMin": 1081,
+            "departMin": 1101,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.4
+            "travelMinutesFromPrevious": 6.3
           },
           {
-            "poiId": "f47ef883-060e-4beb-974e-f8f0656dca1d",
-            "arrivalMin": 1106,
-            "departMin": 1136,
+            "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
+            "arrivalMin": 1108,
+            "departMin": 1128,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.7
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 6.3
           }
         ],
         "preMealStops": [
           {
-            "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
+            "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
             "arrivalMin": 540,
             "departMin": 570,
             "kind": "visit",
@@ -9579,89 +9588,97 @@
             "travelMinutesFromPrevious": null
           },
           {
+            "poiId": "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
+            "arrivalMin": 574,
+            "departMin": 619,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 4.4
+          },
+          {
+            "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
+            "arrivalMin": 624,
+            "departMin": 654,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 5.6
+          },
+          {
             "poiId": "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
-            "arrivalMin": 581,
-            "departMin": 626,
+            "arrivalMin": 666,
+            "departMin": 711,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 11.3
           },
           {
             "poiId": "7e8939d2-813f-47cb-8e93-dbd2923418ee",
-            "arrivalMin": 635,
-            "departMin": 695,
+            "arrivalMin": 720,
+            "departMin": 780,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 9.4
           },
           {
             "poiId": "3b52bc7c-0d87-4158-b020-90d19752424c",
-            "arrivalMin": 703,
-            "departMin": 733,
+            "arrivalMin": 788,
+            "departMin": 818,
             "kind": "visit",
             "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 7.4
           },
           {
-            "poiId": "4de32de8-09e3-46af-ab41-b943fa457b4f",
-            "arrivalMin": 742,
-            "departMin": 787,
+            "poiId": "3927a629-4f0f-4873-af5f-493fc9caafed",
+            "arrivalMin": 830,
+            "departMin": 875,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 9.0
+            "travelMinutesFromPrevious": 12.2
           },
           {
             "poiId": "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
-            "arrivalMin": 795,
-            "departMin": 840,
+            "arrivalMin": 884,
+            "departMin": 929,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 8.7
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 9.7
           },
           {
             "poiId": "95215ac3-b4df-4e15-a403-492e83fb55f2",
-            "arrivalMin": 901,
-            "departMin": 991,
+            "arrivalMin": 935,
+            "departMin": 1025,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 5.2
           },
           {
-            "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
-            "arrivalMin": 997,
-            "departMin": 1017,
+            "poiId": "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
+            "arrivalMin": 1030,
+            "departMin": 1075,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 6.2
-          },
-          {
-            "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
-            "arrivalMin": 1022,
-            "departMin": 1052,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
+            "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 5.5
           },
           {
-            "poiId": "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
-            "arrivalMin": 1057,
-            "departMin": 1102,
+            "poiId": "5a544a5b-472a-4a67-b113-feb1d78d25a1",
+            "arrivalMin": 1081,
+            "departMin": 1101,
             "kind": "visit",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.4
+            "travelMinutesFromPrevious": 6.3
           },
           {
-            "poiId": "f47ef883-060e-4beb-974e-f8f0656dca1d",
-            "arrivalMin": 1106,
-            "departMin": 1136,
+            "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
+            "arrivalMin": 1108,
+            "departMin": 1128,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.7
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 6.3
           }
         ],
         "stops": [
           {
-            "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
+            "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
             "arrivalMin": 540,
             "departMin": 570,
             "kind": "visit",
@@ -9669,104 +9686,112 @@
             "travelMinutesFromPrevious": null
           },
           {
+            "poiId": "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
+            "arrivalMin": 574,
+            "departMin": 619,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 4.4
+          },
+          {
+            "poiId": "de7b1b0f-abdc-4cfa-ab80-81e89f9625af",
+            "arrivalMin": 624,
+            "departMin": 654,
+            "kind": "visit",
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 5.6
+          },
+          {
             "poiId": "b0872bcd-a96e-47a0-8108-e693e3f07ef4",
-            "arrivalMin": 581,
-            "departMin": 626,
+            "arrivalMin": 666,
+            "departMin": 711,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 11.3
           },
           {
             "poiId": "7e8939d2-813f-47cb-8e93-dbd2923418ee",
-            "arrivalMin": 635,
-            "departMin": 695,
+            "arrivalMin": 720,
+            "departMin": 780,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 9.4
           },
           {
-            "poiId": "3b52bc7c-0d87-4158-b020-90d19752424c",
-            "arrivalMin": 703,
-            "departMin": 733,
-            "kind": "visit",
-            "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 7.4
-          },
-          {
-            "poiId": "4de32de8-09e3-46af-ab41-b943fa457b4f",
-            "arrivalMin": 742,
-            "departMin": 787,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 9.0
-          },
-          {
-            "poiId": "7344a3cf-4f46-48ad-bc34-034be49048f4",
-            "arrivalMin": 793,
-            "departMin": 853,
+            "poiId": "0425b48e-8a2f-4447-b9e5-c4f22edde947",
+            "arrivalMin": 788,
+            "departMin": 848,
             "kind": "meal",
             "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 6.9
+            "travelMinutesFromPrevious": 7.9
+          },
+          {
+            "poiId": "3b52bc7c-0d87-4158-b020-90d19752424c",
+            "arrivalMin": 857,
+            "departMin": 887,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 8.5
+          },
+          {
+            "poiId": "3927a629-4f0f-4873-af5f-493fc9caafed",
+            "arrivalMin": 899,
+            "departMin": 944,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 12.2
           },
           {
             "poiId": "f8504d7e-d20d-4cad-b2b9-a774cc17612e",
-            "arrivalMin": 860,
-            "departMin": 905,
+            "arrivalMin": 953,
+            "departMin": 998,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 6.6
+            "transportFromPrevious": "walking",
+            "travelMinutesFromPrevious": 9.7
           },
           {
             "poiId": "95215ac3-b4df-4e15-a403-492e83fb55f2",
-            "arrivalMin": 910,
-            "departMin": 1000,
+            "arrivalMin": 1004,
+            "departMin": 1094,
             "kind": "visit",
             "transportFromPrevious": "transit",
             "travelMinutesFromPrevious": 5.2
           },
           {
-            "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
-            "arrivalMin": 1006,
-            "departMin": 1026,
+            "poiId": "9edc6aa1-1090-4a43-97d5-313c8ff898c8",
+            "arrivalMin": 1099,
+            "departMin": 1144,
             "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 6.2
-          },
-          {
-            "poiId": "212771e2-2daa-4d30-800d-a91a19f50f43",
-            "arrivalMin": 1032,
-            "departMin": 1062,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
+            "transportFromPrevious": "walking",
             "travelMinutesFromPrevious": 5.5
           },
           {
-            "poiId": "a4e724a5-6ef7-4155-ae7d-8c52206f3fa8",
-            "arrivalMin": 1066,
-            "departMin": 1111,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.4
-          },
-          {
-            "poiId": "f47ef883-060e-4beb-974e-f8f0656dca1d",
-            "arrivalMin": 1116,
-            "departMin": 1146,
-            "kind": "visit",
-            "transportFromPrevious": "transit",
-            "travelMinutesFromPrevious": 4.7
-          },
-          {
-            "poiId": "068c5b89-6629-4347-9f10-fa14ef8774ff",
-            "arrivalMin": 1152,
-            "departMin": 1242,
+            "poiId": "97bf9ef9-19f5-45c2-9e2d-af319a2b0fc9",
+            "arrivalMin": 1153,
+            "departMin": 1213,
             "kind": "meal",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 8.9
+          },
+          {
+            "poiId": "5a544a5b-472a-4a67-b113-feb1d78d25a1",
+            "arrivalMin": 1218,
+            "departMin": 1238,
+            "kind": "visit",
+            "transportFromPrevious": "transit",
+            "travelMinutesFromPrevious": 4.5
+          },
+          {
+            "poiId": "17e54c54-9a3f-4c17-ba13-7f1433a2732b",
+            "arrivalMin": 1244,
+            "departMin": 1264,
+            "kind": "visit",
             "transportFromPrevious": "walking",
-            "travelMinutesFromPrevious": 6.1
+            "travelMinutesFromPrevious": 6.3
           }
         ],
-        "idleMin": 78,
-        "travelSavedPct": 9.6
+        "idleMin": 56,
+        "travelSavedPct": 5.4
       }
     ],
     "refill": {
@@ -9795,8 +9820,8 @@
         },
         "2": {
           "status": "above_threshold",
-          "usedMinBefore": 549.0,
-          "usedMinAfter": 549.0,
+          "usedMinBefore": 594.4,
+          "usedMinAfter": 594.4,
           "injected": [],
           "scheduled": []
         }
@@ -9804,21 +9829,25 @@
     }
   },
   "metrics": {
+    "avgRelevance": {
+      "greedy": 0.6,
+      "toptw": 0.602
+    },
     "overrunRate": {
       "greedy": 0.333,
       "toptw": 0.0
     },
     "stopsPerDay": {
-      "greedy": 9.0,
-      "toptw": 9.0
+      "greedy": 10.0,
+      "toptw": 9.33
     },
     "diversity": {
       "greedy": 0.43,
       "toptw": 0.34
     },
     "idleMin": {
-      "greedy": 66.0,
-      "toptw": 138.3
+      "greedy": 62.7,
+      "toptw": 135.7
     }
   }
 }

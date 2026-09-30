@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Schema version of the trace payload. Bump whenever the JSON shape consumed by
 # the frontend changes, then regenerate the baked traces
 # (scripts/generate_demo_traces.py) — the frontend refuses older baked files.
-TRACE_VERSION = 3
+TRACE_VERSION = 4
 
 # ---------------------------------------------------------------------------
 # Persona definitions
@@ -513,7 +513,8 @@ async def build_trace(
             city_lat, city_lng, db,
         )
 
-    metrics = _compute_metrics(greedy_trace, toptw_trace, num_days)
+    prize_by_id = {p["id"]: p["prize"] for p in pois_out}
+    metrics = _compute_metrics(greedy_trace, toptw_trace, num_days, prize_by_id)
 
     # City bounds from POI bounding box
     lats = [p.lat for p in all_demo_pois]
@@ -782,12 +783,20 @@ async def _build_toptw_trace(
     }
 
 
-def _compute_metrics(greedy: dict | None, toptw: dict | None, num_days: int) -> dict:
+def _compute_metrics(
+    greedy: dict | None,
+    toptw: dict | None,
+    num_days: int,
+    prize_by_id: dict | None = None,
+) -> dict:
     """Compute comparison metrics from the two traces.
     Falls back to thesis evaluation numbers where the demo trace lacks data.
     """
-    # Thesis evaluation figures (from evaluation harness across Madrid + Porto)
+    # Thesis evaluation figures (216-itinerary 2x2 factorial evaluation, real-routing
+    # arm: cell B = greedy + API routing, cell D = TOPTW + API routing). avgRelevance
+    # difference is NOT statistically significant (paired Wilcoxon, Holm p=0.708).
     THESIS = {
+        "avgRelevance": {"greedy": 0.638, "toptw": 0.639},
         "overrunRate": {"greedy": 0.144, "toptw": 0.0},
         "stopsPerDay": {"greedy": 7.86, "toptw": 7.19},
         "diversity": {"greedy": 0.43, "toptw": 0.34},
@@ -809,6 +818,23 @@ def _compute_metrics(greedy: dict | None, toptw: dict | None, num_days: int) -> 
     )
     t_overrun_rate = 0.0  # TOPTW guarantees no overrun by design
 
+    # Mean prize (relevance) over included activity POIs. Uses the same prize
+    # values shown on the map, so the "quantity/variety cost" cards above are
+    # read against the (statistically non-significant) quality difference.
+    def _avg_relevance(days):
+        if not prize_by_id:
+            return None
+        prizes = [
+            prize_by_id[s["poiId"]]
+            for d in days
+            for s in d.get("stops", [])
+            if s.get("kind") == "visit" and s.get("poiId") in prize_by_id
+        ]
+        return round(sum(prizes) / len(prizes), 3) if prizes else None
+
+    g_avg_relevance = _avg_relevance(g_days) or THESIS["avgRelevance"]["greedy"]
+    t_avg_relevance = _avg_relevance(t_days) or THESIS["avgRelevance"]["toptw"]
+
     # Stops/day (activity only). A genuine 0 is a valid demo value — only fall
     # back to the thesis figure when there are no days at all.
     def _activity_stops(days):
@@ -827,6 +853,7 @@ def _compute_metrics(greedy: dict | None, toptw: dict | None, num_days: int) -> 
     ) if t_days else THESIS["idleMin"]["toptw"]
 
     return {
+        "avgRelevance": {"greedy": g_avg_relevance, "toptw": t_avg_relevance},
         "overrunRate": {"greedy": g_overrun_rate, "toptw": t_overrun_rate},
         "stopsPerDay": {
             "greedy": _activity_stops(g_days) if g_days else THESIS["stopsPerDay"]["greedy"],

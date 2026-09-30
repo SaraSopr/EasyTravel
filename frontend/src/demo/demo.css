@@ -1838,6 +1838,33 @@
   color: #aaa;
 }
 
+.score-note {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: #999;
+}
+
+.limitations-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  align-items: baseline;
+  padding: 8px 16px 12px;
+  font-size: 0.74rem;
+  color: #9a9488;
+  border-top: 1px solid #ece8e0;
+  flex-shrink: 0;
+}
+
+.limitations-label {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #b0a998;
+  margin-right: 2px;
+}
+
 /* ── Compare layout ── */
 .compare-layout {
   display: grid;

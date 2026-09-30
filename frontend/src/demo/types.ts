@@ -130,6 +130,7 @@ export interface ToptwTrace {
 }
 
 export interface DemoMetrics {
+  avgRelevance: { greedy: number; toptw: number }
   overrunRate: { greedy: number; toptw: number }
   stopsPerDay: { greedy: number; toptw: number }
   diversity: { greedy: number; toptw: number }
@@ -192,7 +193,7 @@ export interface DemoTrace {
 
 /** Must match TRACE_VERSION in backend/app/services/demo_trace.py. Baked
  *  traces with a different version are rejected instead of crashing screens. */
-export const TRACE_VERSION = 3
+export const TRACE_VERSION = 4
 
 // ---------------------------------------------------------------------------
 // POI ingestion pipeline (GET /api/demo/ingestion)

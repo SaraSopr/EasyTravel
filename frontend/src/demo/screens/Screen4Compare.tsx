@@ -374,6 +374,21 @@ export default function Screen4Compare() {
       {/* Scoreboard */}
       <div ref={scoreboardRef} className="scoreboard" style={{ flexShrink: 0 }}>
         <div className="score-card">
+          <div className="score-label">Avg. relevance / POI</div>
+          <div className="score-values">
+            <div>
+              <div className="score-val">{(metrics?.avgRelevance.greedy ?? 0.638).toFixed(3)}</div>
+              <div className="score-side-label">Greedy</div>
+            </div>
+            <div>
+              <div className="score-val">{(metrics?.avgRelevance.toptw ?? 0.639).toFixed(3)}</div>
+              <div className="score-side-label">TOPTW</div>
+            </div>
+          </div>
+          <div className="score-note">not significant (p=0.71)</div>
+        </div>
+
+        <div className="score-card">
           <div className="score-label">Overrun days</div>
           <div className="score-values">
             <div>
@@ -431,9 +446,17 @@ export default function Screen4Compare() {
 
         {techMode && (
           <div className="tech-overlay" style={{ gridColumn: '1 / -1' }}>
-            Overrun, stops and idle are computed from this {greedy?.days?.length ?? 3}-day run. Diversity comes from the thesis evaluation across Madrid + Porto (mean pairwise cosine distance in category embedding space). Idle = waits + unused tail of the day budget.
+            Overrun, stops and idle are computed from this {greedy?.days?.length ?? 3}-day run. Avg. relevance and diversity come from the 216-itinerary 2×2 factorial evaluation (Rome + Madrid + Porto, real-routing arm; mean pairwise cosine distance in the 7-d feature space for diversity). Idle = waits + unused tail of the day budget.
           </div>
         )}
+      </div>
+
+      <div className="limitations-strip">
+        <span className="limitations-label">Scope &amp; limits</span>
+        <span>Eval covers 3 cities (Rome, Madrid, Porto) — not a random sample.</span>
+        <span>κ=0.953 measures LLM self-consistency across two calls, not correctness.</span>
+        <span>Human eval: 9 evaluators, 158 pairwise + 90 whole-itinerary ratings.</span>
+        <span>Onboarding is implemented but not independently user-evaluated.</span>
       </div>
     </div>
   )
