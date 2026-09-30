@@ -30,6 +30,7 @@ try:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
+    import matplotlib.ticker as mtick
     HAS_MPL = True
 except ImportError:
     HAS_MPL = False
@@ -41,6 +42,18 @@ except ImportError:
 def avg(vals: list) -> float | None:
     v = [float(x) for x in vals if x not in ("", "None", None)]
     return round(sum(v) / len(v), 4) if v else None
+
+
+def avg_raw(vals: list) -> float | None:
+    """Unrounded mean, for labels that are formatted at display time.
+
+    ``avg`` rounds to 4 decimals so the console table stays readable, but
+    feeding that into a percentage label rounds twice: the cell-A overrun mean
+    of 0.143519 becomes 0.1435 and then prints as "14.3%", while the thesis
+    tables report 14.4%. Percentage labels therefore use this instead.
+    """
+    v = [float(x) for x in vals if x not in ("", "None", None)]
+    return sum(v) / len(v) if v else None
 
 
 CELL_ORDER = [
@@ -145,22 +158,43 @@ def print_ablation_decomposition(cells: dict) -> None:
 
 # ── plots ────────────────────────────────────────────────────────────────────
 
-def _bar_group(ax, data: list[float | None], title: str, ylabel: str, note: str = "") -> None:
+def _bar_group(
+    ax,
+    data: list[float | None],
+    title: str,
+    ylabel: str,
+    note: str = "",
+    percent: bool = False,
+    note_right: bool = False,
+) -> None:
+    """Grouped bar chart over the four ablation cells.
+
+    ``percent`` formats bar labels and the y-axis as percentages with one
+    decimal, so rate metrics read the same way here as in the thesis tables:
+    a mean of 0.143519 prints as "14.4%" rather than "0.143", which rounds the
+    other way at three decimals and looks like a different number.
+    ``note_right`` anchors the explanatory box to the top-right corner, for
+    panels whose tallest bar is on the left.
+    """
     x = range(len(CELL_ORDER))
     colors = [COLORS[k] for k in CELL_ORDER]
     labels = [CELL_LABELS[k] for k in CELL_ORDER]
     vals = [v if v is not None else 0 for v in data]
     bars = ax.bar(x, vals, color=colors, width=0.55, edgecolor="white", linewidth=1.2)
-    ax.bar_label(bars, [f"{v:.3f}" for v in vals], padding=3, fontsize=8)
+    fmt = (lambda v: f"{v * 100:.1f}%") if percent else (lambda v: f"{v:.3f}")
+    ax.bar_label(bars, [fmt(v) for v in vals], padding=3, fontsize=8)
     ax.set_xticks(list(x))
     ax.set_xticklabels(labels, fontsize=8)
     ax.set_ylabel(ylabel, fontsize=9)
     ax.set_title(title, fontsize=10, fontweight="bold", pad=8)
     ax.spines[["top", "right"]].set_visible(False)
     ax.set_ylim(0, max(vals) * 1.25 if max(vals) > 0 else 1)
+    if percent:
+        ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1, decimals=0))
     if note:
-        ax.text(0.01, 0.97, note, transform=ax.transAxes,
-                fontsize=7, va="top", color="#666666",
+        ax.text(0.98 if note_right else 0.01, 0.97, note, transform=ax.transAxes,
+                fontsize=7, va="top", ha="right" if note_right else "left",
+                color="#666666",
                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#cccccc", alpha=0.8))
 
 
@@ -251,17 +285,19 @@ def plot_main_figures(cells: dict, out_dir: Path) -> None:
 
     _bar_group(
         axes[0],
-        [avg([r["real_overrun_day_rate"] for r in cells[k]]) for k in CELL_ORDER],
+        [avg_raw([r["real_overrun_day_rate"] for r in cells[k]]) for k in CELL_ORDER],
         "Overrun rate\n(fraction of days that exceed budget in reality)",
         "overrun rate (↓ better = 0%)",
         "Haversine (straight-line) estimates are optimistic.\n"
         "Plans built on them may underestimate real travel time\n"
         "→ day runs past its end time in the real world.",
+        percent=True,
+        note_right=True,
     )
     _bar_group(
         axes[1],
         [avg([r["real_overrun_min_avg"] for r in cells[k]]) for k in CELL_ORDER],
-        "Overrun magnitude\n(avg minutes past budget, overrun days only)",
+        "Overrun magnitude\n(avg minutes past budget, all days)",
         "avg overrun (min) (↓ better)",
     )
 
